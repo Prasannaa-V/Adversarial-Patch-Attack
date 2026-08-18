@@ -1,0 +1,36 @@
+# InfraEdge-Shield — System Configuration
+# Copy to config/config.yaml and edit before running
+
+inference:
+  camera_index: 0          # USB camera index (0 = default webcam)
+  camera_url: ""           # Set to rtsp://... or http://... for IP camera (overrides index)
+  yolo_model: "yolov8n.pt" # Auto-downloaded by ultralytics on first run
+  sdnl_model: "models/sdnl/sdnl_v1.tflite"  # Path to trained TFLite model
+  sdnl_threshold: 0.85     # Attack detection threshold (0.0 - 1.0)
+  frame_width: 640
+  frame_height: 640
+  fps_target: 20
+
+mqtt:
+  broker_host: "localhost"  # Mosquitto broker on this PC
+  broker_port: 1883
+  keepalive: 60
+  topics:
+    attack_alert: "infraedge/attack_alert"
+    attack_ack:   "infraedge/attack_ack"
+    override:     "infraedge/override"
+    heartbeat:    "infraedge/heartbeat"
+    status:       "infraedge/status"
+
+backend:
+  host: "localhost"
+  port: 3000
+  events_endpoint: "/api/events"
+
+storage:
+  frames_dir: "data/frames"
+  max_frames_days: 90      # Auto-cleanup frames older than this
+
+esp32:
+  heartbeat_interval_s: 5
+  watchdog_timeout_s: 15

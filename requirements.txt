@@ -1,0 +1,18 @@
+# InfraEdge-Shield — Python Inference Requirements
+ultralytics>=8.3.0
+opencv-python>=4.10.0
+numpy>=1.26.0
+paho-mqtt>=2.1.0
+requests>=2.32.0
+scipy>=1.13.0
+tqdm>=4.66.0
+Pillow>=10.4.0
+PyYAML>=6.0.2
+
+# For SDNL training (GPU machine)
+# torch>=2.3.0
+# torchvision>=0.18.0
+
+# TFLite runtime (edge inference)
+# tflite-runtime>=2.14.0   # use this on Raspberry Pi / lightweight
+# tensorflow>=2.16.0       # use this on PC for training + conversion

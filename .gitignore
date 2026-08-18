@@ -1,0 +1,34 @@
+# ── Python ─────────────────────────────────────────
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# ── Node ───────────────────────────────────────────
+node_modules/
+dashboard/frontend/dist/
+
+# ── Models & weights (large binaries, regenerable) ─
+models/**/*.pt
+models/**/*.pth
+models/**/*.onnx
+models/**/*.onnx.data
+yolov8n.pt
+*.tflite
+
+# ── Datasets & runtime artifacts (large/regenerable)
+data/apde/
+data/apricot/
+data/preprocessed/
+data/frames/
+
+# ── Databases ──────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Logs / OS / env ────────────────────────────────
+*.log
+.DS_Store
+.env
