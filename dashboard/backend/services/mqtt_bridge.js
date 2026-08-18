@@ -103,7 +103,7 @@ class MQTTBridge {
         if (payload.frame_id) {
           const checkRow = await dbService.get('SELECT COUNT(*) as count FROM attack_events WHERE frame_id = ?', [payload.frame_id]);
           if (checkRow.count === 0) {
-            await dbService.insertEvent({
+            const id = await dbService.insertEvent({
               timestamp: payload.timestamp || new Date().toISOString(),
               frame_id: payload.frame_id,
               frame_path: payload.frame_path || '',
@@ -111,6 +111,18 @@ class MQTTBridge {
               gate_status: 'LOCKED',
               operator_ack: 0,
               notes: 'Stored via MQTT bridge backup'
+            });
+            // The HTTP POST /api/events path emits 'attack_alert' itself on success.
+            // Reaching here with count === 0 means that POST never landed, so the UI
+            // was never notified — push the alert now so the dashboard still updates.
+            this.io.emit('attack_alert', {
+              id,
+              timestamp: payload.timestamp || new Date().toISOString(),
+              frame_id: payload.frame_id,
+              frame_path: payload.frame_path || '',
+              confidence: payload.confidence,
+              gate_status: 'LOCKED',
+              operator_ack: 0
             });
           }
         }

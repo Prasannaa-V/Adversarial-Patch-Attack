@@ -51,6 +51,13 @@ unsigned long lockStartMs        = 0;
 const unsigned long WATCHDOG_MS  = 15000UL;  // 15 seconds
 const unsigned long LOCKOUT_MS   = 30000UL;  // 30-second auto-release
 
+// ── Buzzer (non-blocking) ───────────────────────────────────────────────────
+// The alarm tone is started when the gate locks and stopped from loop() after
+// BUZZER_MS, so mqttCallback()/activateLock() never block mqttClient.loop().
+unsigned long buzzerStartMs      = 0;
+bool          buzzerActive       = false;
+const unsigned long BUZZER_MS    = 2000UL;   // 2-second alarm tone
+
 // ── LED Flash ─────────────────────────────────────────────────────────────────
 Ticker ledTicker;
 bool   ledState = false;
@@ -68,6 +75,9 @@ void activateLock();
 void deactivateLock();
 void startLedFlash();
 void stopLedFlash();
+void startBuzzer();
+void stopBuzzer();
+void checkBuzzer();
 void mqttCallback(char* topic, byte* payload, unsigned int length);
 void checkWatchdog();
 void checkLockoutTimer();
@@ -119,6 +129,7 @@ void loop() {
   checkWatchdog();
   checkLockoutTimer();
   handleOverrideButton();
+  checkBuzzer();      // Non-blocking: stops the alarm tone after BUZZER_MS
 
   // Green LED = system healthy (IDLE state, connected)
   bool healthy = (currentState == IDLE) && mqttClient.connected();
@@ -193,13 +204,7 @@ void activateLock() {
   currentState = LOCKED;
   lockStartMs = millis();
   startLedFlash();
-  // Buzzer alarm: 880 Hz for 2 seconds
-  ledcSetup(0, 880, 8);            // Channel 0, 880 Hz, 8-bit resolution
-  ledcAttachPin(BUZZER_PIN, 0);
-  ledcWrite(0, 128);               // 50% duty cycle
-  delay(2000);
-  ledcWrite(0, 0);                 // Stop buzzer
-  ledcDetachPin(BUZZER_PIN);
+  startBuzzer();                   // Non-blocking 880 Hz tone; stopped by checkBuzzer()
   Serial.println("[GATE] LOCKED — Relay HIGH, LED flashing");
 }
 
@@ -207,8 +212,36 @@ void deactivateLock() {
   digitalWrite(RELAY_PIN, LOW);    // De-energize relay → gate unlocked
   currentState = IDLE;
   stopLedFlash();
+  stopBuzzer();                    // Silence alarm when the gate is released
   digitalWrite(LED_RED, LOW);
   Serial.println("[GATE] UNLOCKED — Relay LOW");
+}
+
+
+// =============================================================================
+// Buzzer — non-blocking alarm tone (880 Hz PWM on channel 0)
+// Started by activateLock(); stopped from loop() via checkBuzzer() so the MQTT
+// callback returns immediately and ACK latency stays well under 200 ms.
+// =============================================================================
+void startBuzzer() {
+  ledcSetup(0, 880, 8);            // Channel 0, 880 Hz, 8-bit resolution
+  ledcAttachPin(BUZZER_PIN, 0);
+  ledcWrite(0, 128);               // 50% duty cycle
+  buzzerActive  = true;
+  buzzerStartMs = millis();
+}
+
+void stopBuzzer() {
+  if (!buzzerActive) return;
+  ledcWrite(0, 0);                 // Stop buzzer
+  ledcDetachPin(BUZZER_PIN);
+  buzzerActive = false;
+}
+
+void checkBuzzer() {
+  if (buzzerActive && (millis() - buzzerStartMs > BUZZER_MS)) {
+    stopBuzzer();
+  }
 }
 
 

@@ -1,3 +1,11 @@
+> ⚠️ **SUPERSEDED (2026-08-18).** This analysis assumes the original **RPi 4B + OAK-D
+> stereo-depth** design, which has been abandoned. The system is now a **single PC/laptop +
+> ESP32** build with a generic USB/RTSP camera (no depth), and the depth-fusion novelty (N4)
+> was dropped. For the current state see **`docs/session_starter.md`** and **`docs/progress.md`**;
+> `docs/paper_sections.md` remains authoritative for the paper. Kept for historical reference only.
+
+---
+
 # 🔬 FEASIBILITY ANALYSIS
 ## InfraEdge-Shield — Technical, Hardware & Publication Feasibility
 

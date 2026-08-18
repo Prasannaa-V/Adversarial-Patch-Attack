@@ -1,3 +1,11 @@
+> ⚠️ **SUPERSEDED (2026-08-18).** This document describes the original **RPi 4B + OAK-D
+> stereo-depth** design, which has been abandoned. The system is now a **single PC/laptop +
+> ESP32** build with a generic USB/RTSP camera (no depth). For the current state see
+> **`docs/session_starter.md`** and **`docs/progress.md`**; `docs/paper_sections.md` remains
+> authoritative for the paper. Kept for historical reference only — do not implement from this file.
+
+---
+
 # 📋 PROJECT PLANS
 ## InfraEdge-Shield — Full Roadmap & Milestone Plan
 

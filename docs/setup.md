@@ -1,3 +1,11 @@
+> ⚠️ **SUPERSEDED (2026-08-18).** These setup steps target the original **RPi 4B + OAK-D**
+> hardware/toolchain, which has been abandoned. The system is now a **single PC/laptop + ESP32**
+> build with a generic USB/RTSP camera (no depth). For the current state and setup see
+> **`docs/session_starter.md`** and **`docs/progress.md`**; `docs/paper_sections.md` remains
+> authoritative for the paper. Kept for historical reference only — do not follow this file.
+
+---
+
 # ⚙️ SETUP GUIDE
 ## InfraEdge-Shield — Complete Environment Setup Instructions
 

@@ -1,87 +1,71 @@
-# 🚀 SESSION STARTER
-## Real-Time Detection and Mitigation of Physical Adversarial Patch Attacks in Edge-Based Smart Infrastructure
+# 🚀 SESSION STARTER — InfraEdge-Shield
 
-> **Read this file first at the start of every new session.**
-> It tells you exactly where you are, what was last done, and what to do next.
+> **Read this first.** It reflects the ACTUAL as-built system (verified against the code on
+> 2026-08-18), not the original design docs. Several older docs describe a superseded
+> RPi + OAK-D design — see "Superseded docs" below.
 
----
-
-## 📌 Project Identity
-
-| Field | Value |
-|---|---|
-| **Project Title** | Real-Time Detection and Mitigation of Physical Adversarial Patch Attacks in Edge-Based Smart Infrastructure |
-| **Short Name** | InfraEdge-Shield |
-| **Goal** | Build a working system + publish research paper + file patent |
-| **Primary Publication Target** | IEEE Transactions on IoT (Journal) OR USENIX Security (Conference) |
-| **Patent Strategy** | **Provisional Patent FIRST** → then publish |
-| **Project Root** | `/home/prasannaa/Projects/p1/` |
-| **Docs Root** | `/home/prasannaa/Projects/p1/docs/` |
+**Project:** Real-Time Detection & Mitigation of Physical Adversarial Patch Attacks in
+Edge-Based Smart Infrastructure.
+**Goal:** Working system + top-tier paper (IEEE Trans. IoT / Computers & Security) +
+India provisional patent (patent-FIRST).
+**Status:** ~50% complete.
 
 ---
 
-## ⚙️ Confirmed Hardware & Software Choices
+## Actual architecture (as-built)
 
-| Component | Choice | Notes |
-|---|---|---|
-| **Edge Compute Node** | Raspberry Pi 4B (primary) | Runs YOLOv8n + SDNL concurrently |
-| **Camera** | OAK-D (Stereo + Neural Processing) OR Intel RealSense D435i | OAK-D preferred: onboard MyriadX NPU offloads detection |
-| **Failsafe MCU** | ESP32 | MQTT subscriber → triggers relay/gate lock on attack |
-| **Dataset** | APDE (94K, 94 patch types, ICCV 2025) + APRICOT | Newest available; no self-collection needed |
-| **Dashboard** | Full-featured React + Node.js | Live stream + attack gallery + analytics + manual override |
-| **Patent** | File provisional BEFORE first public presentation | Protects dual-model + hardware-in-loop novelty |
+A single workstation/laptop runs the full detection pipeline; an ESP32 is the fail-secure
+gate actuator. No Raspberry Pi, no OAK-D, no depth sensor.
 
----
+- **Camera:** generic USB webcam or RTSP/HTTP IP camera (monocular, no depth).
+- **Detector:** YOLOv8n (Ultralytics) via OpenCV — `inference/detector.py`.
+- **SDNL patch classifier:** 4-channel input **RGB + DCT high-frequency energy**
+  (NO Laplacian, NO depth) → MobileNetV3-Small (<500K params), ONNX Runtime backend —
+  `inference/sdnl.py`. 128×128 ROI, decision threshold 0.85.
+- **Pipeline:** 3 threads (frame reader → SDNL worker → alert publisher) with bounded
+  queues — `inference/pipeline.py`. Classifies each ROI independently per frame
+  (no temporal tracking yet).
+- **Actuator:** ESP32 relay, fail-secure. Boots LOCKED, 15 s heartbeat watchdog, 30 s
+  auto-release, manual override button — `esp32/firmware/src/main.cpp`.
+- **Messaging:** Mosquitto MQTT. Topics `infraedge/{attack_alert, attack_ack, override,
+  heartbeat, status}`. QoS1 for safety-critical, QoS0 for heartbeat.
+- **Backend:** Node/Express + Socket.IO + MQTT bridge + SQLite — `dashboard/backend/`.
+  Serves frames statically; POST /api/events ingests alerts and emits `attack_alert`.
+- **Frontend:** React 19 + Vite, single `App.jsx` — `dashboard/frontend/`. Deps: react,
+  socket.io-client, lucide-react only (no chart lib / router / axios).
 
-## 🗂️ Context Files Index
-
-| File | Location | Purpose |
-|---|---|---|
-| **session_starter.md** ← YOU ARE HERE | `docs/session_starter.md` | Quick-start every session |
-| **plans.md** | `docs/plans.md` | Full roadmap, milestones, timeline |
-| **architecture_plan.md** | `docs/architecture_plan.md` | System diagrams, data flow, API contracts |
-| **build_plan.md** | `docs/build_plan.md` | Step-by-step implementation guide |
-| **progress.md** | `docs/progress.md` | Live task tracker (update every session) |
-| **feasibility.md** | `docs/feasibility.md` | Technical, hardware, publication feasibility |
-| **setup.md** | `docs/setup.md` | Environment setup, wiring, dependency install |
-
----
-
-## 🔴 Current Phase
-
-```
-[PHASE 0] ✅ Planning & Literature Survey COMPLETE
-[PHASE 1] ⬜ Environment Setup & Dataset Preparation  ← NEXT
-[PHASE 2] ⬜ Secondary Diagnostic Neural Layer (SDNL) Training
-[PHASE 3] ⬜ Dual-Model Edge Integration
-[PHASE 4] ⬜ ESP32 Hardware Failsafe
-[PHASE 5] ⬜ Full-Featured Dashboard
-[PHASE 6] ⬜ System Integration & Benchmarking
-[PHASE 7] ⬜ Provisional Patent Filing
-[PHASE 8] ⬜ Paper Writing & Journal Submission
-```
+### Data flow
+camera → YOLOv8n (ROIs) → SDNL (RGB+DCT) → if p ≥ 0.85: MQTT `attack_alert` (QoS1) +
+HTTP POST /api/events → ESP32 locks relay + ACK; backend stores event + Socket.IO pushes
+to dashboard. PC sends a heartbeat every 5 s; if it stops, the ESP32 watchdog auto-locks
+within 15 s (fail-secure).
 
 ---
 
-## 🧠 Core System Concept (One Paragraph)
+## Three known critical issues (resolve before paper/patent)
 
-A stereo camera (OAK-D) streams video to a Raspberry Pi 4B. **YOLOv8n** (primary detector) runs at ~30 FPS and detects persons/vehicles. For each detected ROI, a **Secondary Diagnostic Neural Layer (SDNL)** — a custom lightweight CNN (<500K params) — analyzes high-frequency spatial anomalies in parallel to identify adversarial patch signatures. On detection, the Pi sends an MQTT alert to an **ESP32**, which autonomously locks the gate via a relay. Simultaneously, the flagged frame is streamed to a **React + Node.js** security dashboard for human review and logging.
+1. **[BLOCKER] Dataset is not paper-valid.** `data/apde/` holds APRICOT-derived crops +
+   synthetic fabricated images, NOT the real APDE dataset. Clean vs attack are adjacent
+   crops of the *same* images, so the reported ~98.5% acc / ~1.05% FPR are NOT trustworthy.
+   Real APDE + an independent clean FPR set (COCO val2017 / INRIA) are required, then
+   retrain + re-benchmark. **Cannot be fixed by editing code** — needs data + a training run.
+2. **[SECURITY] Edge actuation is spoofable.** MQTT is anonymous + no TLS and POST /api/gate
+   is unauthenticated — anyone on the LAN can forge `override:unlock` or spoof heartbeats to
+   defeat the watchdog. This is also the seed for patent novelty **N-C** (Zero-Trust Edge
+   Attestation).
+3. **No prior version control** — fixed 2026-08-18 (`git init` + `.gitignore`; baseline committed).
 
 ---
 
-## 🆕 What To Do Next Session
-
-1. Check `progress.md` for current task status
-2. Start Phase 1: run `setup.md` instructions
-3. Download APDE dataset from: https://github.com/Gandolfczjh/APDE
-4. Set up Python virtual environment per `setup.md`
+## Superseded docs (historical only — do NOT implement from them)
+`docs/architecture_plan.md`, `docs/build_plan.md`, `docs/plans.md`, `docs/setup.md`,
+`docs/feasibility.md` describe the abandoned RPi 4B + OAK-D stereo-depth design
+(5-channel RGB+DCT+Laplacian, TFLite INT8, CRA/TypeScript, `edge/` / `embedded/` dirs).
+Each now carries a SUPERSEDED banner. `docs/paper_sections.md` remains authoritative for the paper.
 
 ---
 
-## 📞 Key References (Always Available)
-
-- APDE Benchmark (ICCV 2025): https://arxiv.org/abs/2508.00649
-- Jedi (CVPR 2023): https://openaccess.thecvf.com/content/CVPR2023
-- YOLOv8 Docs: https://docs.ultralytics.com
-- OAK-D DepthAI SDK: https://docs.luxonis.com
-- APRICOT Dataset: https://apricot.cs.columbia.edu
+## Next session
+Open `docs/progress.md` and work the top unchecked **Phase A** item. Phase A (integrity +
+fixes) must finish before Phase B novelties, because the paper's numbers depend on a valid
+dataset.

@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Union
 import uuid
 import logging
@@ -54,7 +54,7 @@ class FrameBundle:
     """Output of one detection cycle."""
     rgb_frame: np.ndarray
     detections: List[BBox] = field(default_factory=list)
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     frame_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
 
     def is_empty(self) -> bool:
