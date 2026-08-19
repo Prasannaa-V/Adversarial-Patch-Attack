@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS attack_events (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp       TEXT    NOT NULL,                  -- ISO 8601 UTC
-    frame_id        TEXT    NOT NULL,
+    frame_id        TEXT    NOT NULL UNIQUE,           -- Unique constraint prevents race duplicate inserts
     frame_path      TEXT    NOT NULL DEFAULT '',
     confidence      REAL    NOT NULL,
     gate_status     TEXT    NOT NULL DEFAULT 'LOCKED', -- LOCKED / UNLOCKED

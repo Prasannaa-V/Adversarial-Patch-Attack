@@ -105,7 +105,8 @@ class DualModelPipeline:
         self._roi_queue: queue.Queue = queue.Queue(maxsize=10)
         self._alert_queue: queue.Queue = queue.Queue(maxsize=5)
 
-        # Metrics
+        # Metrics & Thread Safety Lock
+        self._metrics_lock = threading.Lock()
         self._fps = 0.0
         self._sdnl_latency_ms = 0.0
         self._frame_count = 0
@@ -162,13 +163,30 @@ class DualModelPipeline:
         logger.info("All 3 threads operational. Monitoring stream...")
 
         # Main thread: heartbeat and max frames check loop
+        last_heartbeat_time = time.time()
+        last_cleanup_time = time.time()
+
         try:
             while self._running:
-                time.sleep(1.0)
-                self._send_heartbeat()
-                self._log_stats()
+                time.sleep(0.5)
+                now = time.time()
+
+                # Send heartbeat per config cadence (H3 fix)
+                if now - last_heartbeat_time >= self.config.heartbeat_interval_s:
+                    self._send_heartbeat()
+                    self._log_stats()
+                    last_heartbeat_time = now
+
+                # Cleanup old frames every 10 minutes (M2 fix)
+                if now - last_cleanup_time >= 600:
+                    if self._store:
+                        self._store.cleanup_old_frames(max_days=7)
+                    last_cleanup_time = now
                 
-                if self.config.max_frames and self._frame_count >= self.config.max_frames:
+                with self._metrics_lock:
+                    current_frames = self._frame_count
+
+                if self.config.max_frames and current_frames >= self.config.max_frames:
                     logger.info(f"Reached max frames limit ({self.config.max_frames}). Stopping pipeline.")
                     break
         except KeyboardInterrupt:
@@ -184,8 +202,10 @@ class DualModelPipeline:
         if self._mqtt:
             self._mqtt.disconnect()
         uptime = time.time() - self._t_start if self._t_start else 0.0
+        with self._metrics_lock:
+            fc, ac = self._frame_count, self._attack_count
         logger.info("Pipeline stopped. Final Stats | Processed Frames: %d | Attacks Detected: %d | Uptime: %.1fs",
-                    self._frame_count, self._attack_count, uptime)
+                    fc, ac, uptime)
 
     # ── Thread 1: Frame Reader ────────────────────────────────────────────────
     def _frame_reader(self):
@@ -198,15 +218,16 @@ class DualModelPipeline:
                 time.sleep(0.05)
                 continue
 
-            self._frame_count += 1
-            fps_count += 1
+            with self._metrics_lock:
+                self._frame_count += 1
+                fps_count += 1
 
-            # Update FPS every 2 seconds
-            elapsed = time.time() - fps_window_start
-            if elapsed >= 2.0:
-                self._fps = fps_count / elapsed
-                fps_count = 0
-                fps_window_start = time.time()
+                # Update FPS every 2 seconds
+                elapsed = time.time() - fps_window_start
+                if elapsed >= 2.0:
+                    self._fps = fps_count / elapsed
+                    fps_count = 0
+                    fps_window_start = time.time()
 
             if bundle.is_empty():
                 continue
@@ -234,13 +255,15 @@ class DualModelPipeline:
             for bbox in bundle.detections:
                 roi = bbox.to_roi(bundle.rgb_frame)
                 label, conf = self._sdnl.infer(roi)
-                self._sdnl_latency_ms = self._sdnl.get_latency_ms()
+                with self._metrics_lock:
+                    self._sdnl_latency_ms = self._sdnl.get_latency_ms()
 
                 if label == "ATTACK" and conf > max_confidence:
                     max_confidence = conf
 
             if max_confidence >= self.config.sdnl_threshold:
-                self._attack_count += 1
+                with self._metrics_lock:
+                    self._attack_count += 1
                 alert = AlertPayload(bundle=bundle, confidence=max_confidence)
                 try:
                     self._alert_queue.put_nowait(alert)
@@ -248,6 +271,21 @@ class DualModelPipeline:
                     logger.warning("Alert queue full — dropping alert")
 
     # ── Thread 3: Alert Publisher ─────────────────────────────────────────────
+    def _post_alert_async(self, backend_url: str, confidence: float, frame_path: str, frame_id: str):
+        try:
+            requests.post(
+                f"{backend_url}/api/events",
+                json={
+                    "confidence": confidence,
+                    "frame_path": frame_path,
+                    "frame_id": frame_id,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+                timeout=2.0,
+            )
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Async Backend POST failed: {e}")
+
     def _alert_publisher(self):
         while self._running:
             try:
@@ -260,7 +298,7 @@ class DualModelPipeline:
             # 1. Save flagged frame
             frame_path = self._store.save_frame(alert.bundle.rgb_frame, frame_id)
 
-            # 2. Publish MQTT alert (QoS 1)
+            # 2. Publish MQTT alert (QoS 1) - Critical path
             if self._mqtt and self._mqtt.is_connected():
                 self._mqtt.publish_alert(
                     confidence=alert.confidence,
@@ -268,21 +306,13 @@ class DualModelPipeline:
                     frame_path=frame_path,
                 )
 
-            # 3. POST to Node.js backend
+            # 3. Asynchronous non-blocking POST to Node.js backend (H4 fix)
             if not self.config.dry_run:
-                try:
-                    requests.post(
-                        f"{self.config.backend_url}/api/events",
-                        json={
-                            "confidence": alert.confidence,
-                            "frame_path": frame_path,
-                            "frame_id": frame_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        },
-                        timeout=2.0,
-                    )
-                except requests.exceptions.RequestException as e:
-                    logger.warning(f"Backend POST failed: {e}")
+                threading.Thread(
+                    target=self._post_alert_async,
+                    args=(self.config.backend_url, alert.confidence, frame_path, frame_id),
+                    daemon=True,
+                ).start()
 
             if self.config.dry_run:
                 logger.info(

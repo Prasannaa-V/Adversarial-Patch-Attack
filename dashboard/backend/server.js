@@ -1,6 +1,6 @@
 /**
  * server.js
- * Express server + Socket.IO entry point. Integrates database and MQTT bridge.
+ * Express server + Socket.IO entry point. Integrates database, JWT auth, and MQTT bridge.
  */
 
 const express = require('express');
@@ -9,16 +9,18 @@ const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 
+const authRouter = require('./routes/auth');
 const eventRouter = require('./routes/events');
 const gateRouter = require('./routes/gate');
 const statsRouter = require('./routes/stats');
 const MQTTBridge = require('./services/mqtt_bridge');
+const dbService = require('./services/db');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: process.env.ALLOWED_ORIGINS || '*',
     methods: ['GET', 'POST']
   }
 });
@@ -32,7 +34,6 @@ app.use(cors());
 app.use(express.json());
 
 // Serve saved frame image folder statically
-// So the dashboard can render frame_path like: http://localhost:3000/frames/2026-08-17/attack_abc.jpg
 const projectRoot = path.join(__dirname, '../..');
 const framesDir = path.join(projectRoot, 'data/frames');
 app.use('/frames', express.static(framesDir));
@@ -45,6 +46,7 @@ app.set('io', io);
 app.set('mqttBridge', mqttBridge);
 
 // REST Routes
+app.use('/api/auth', authRouter);
 app.use('/api/events', eventRouter);
 app.use('/api/gate', gateRouter);
 app.use('/api/stats', statsRouter);
@@ -53,27 +55,29 @@ app.use('/api/stats', statsRouter);
 app.get('/', (req, res) => {
   res.json({
     status: 'online',
-    name: 'InfraEdge-Shield Security Gateway API',
+    name: 'Smart Infrastructure Security Gateway API',
     uptime: process.uptime()
   });
 });
 
 // WebSocket Connection Handlers
 io.on('connection', (socket) => {
-  console.log(`[Socket.IO] New client connected: ${socket.id}`);
-  
-  // Send current ESP32 online state on connection
+  console.log(`[Socket.IO] Client connected: ${socket.id}`);
   socket.emit('esp32_status', { online: mqttBridge.esp32Online });
-
   socket.on('disconnect', () => {
     console.log(`[Socket.IO] Client disconnected: ${socket.id}`);
   });
 });
 
-// Start listening
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`=== InfraEdge-Shield Backend Operational ===`);
-  console.log(`  REST API Port: ${PORT}`);
-  console.log(`  MQTT Broker:   ${MQTT_BROKER_URL}`);
-  console.log(`  Frame Storage: ${framesDir}`);
-});
+// Await DB Schema Init before listening to prevent cold-start race (H8 fix)
+async function startServer() {
+  await dbService.initDbPromise;
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`=== Smart Infrastructure Security Backend Operational ===`);
+    console.log(`  REST API Port: ${PORT}`);
+    console.log(`  MQTT Broker:   ${MQTT_BROKER_URL}`);
+    console.log(`  Frame Storage: ${framesDir}`);
+  });
+}
+
+startServer();

@@ -81,10 +81,11 @@ const initDb = async () => {
   }
 };
 
-initDb();
+const initDbPromise = initDb();
 
 module.exports = {
   db,
+  initDbPromise,
   run,
   get,
   all,
@@ -92,7 +93,7 @@ module.exports = {
   // Event Operations
   async insertEvent(event) {
     const sql = `
-      INSERT INTO attack_events (timestamp, frame_id, frame_path, confidence, gate_status, operator_ack, notes)
+      INSERT OR IGNORE INTO attack_events (timestamp, frame_id, frame_path, confidence, gate_status, operator_ack, notes)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `;
     const result = await run(sql, [

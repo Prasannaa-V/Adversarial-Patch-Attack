@@ -17,11 +17,22 @@ models/**/*.onnx.data
 yolov8n.pt
 *.tflite
 
-# ── Datasets & runtime artifacts (large/regenerable)
+# ── Datasets, Crops & Runtime Image Artifacts ──────
 data/apde/
 data/apricot/
+data/coco_clean/
+data/crops/
 data/preprocessed/
 data/frames/
+
+# ── Image Extensions ───────────────────────────────
+*.jpg
+*.jpeg
+*.png
+*.bmp
+*.webp
+*.gif
+*.tiff
 
 # ── Databases ──────────────────────────────────────
 *.db

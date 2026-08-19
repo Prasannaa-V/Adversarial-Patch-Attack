@@ -1,7 +1,8 @@
 """
 training/parse_apricot.py
-Parses official APRICOT COCO annotations, crops physical adversarial patch ROIs (attack)
-and background object ROIs (clean), and prepares 4-channel preprocessed tensors.
+Parses official APRICOT COCO annotations and crops physical adversarial patch ROIs (attack).
+NO same-image clean background crops are generated to prevent data leakage.
+Clean non-attack samples must be sourced from an independent dataset (COCO val2017).
 """
 
 import os
@@ -16,22 +17,17 @@ from sdnl import build_4ch_tensor
 
 
 def parse_and_extract(apricot_dir="data/apricot", output_data_dir="data"):
-    clean_out = os.path.join(output_data_dir, "apde", "clean")
-    attack_out = os.path.join(output_data_dir, "apde", "attack")
-    prep_clean = os.path.join(output_data_dir, "preprocessed", "clean")
+    attack_out = os.path.join(output_data_dir, "crops", "attack")
     prep_attack = os.path.join(output_data_dir, "preprocessed", "attack")
 
-    os.makedirs(clean_out, exist_ok=True)
     os.makedirs(attack_out, exist_ok=True)
-    os.makedirs(prep_clean, exist_ok=True)
     os.makedirs(prep_attack, exist_ok=True)
 
     splits = [("dev", "apricot_annotations_dev.json"), ("test", "apricot_annotations_test.json")]
     
     total_attacks = 0
-    total_cleans = 0
 
-    print("=== Processing Real APRICOT Physical Adversarial Patch Dataset ===")
+    print("=== Extracting Real APRICOT Physical Adversarial Patch Crops ===")
 
     for split_name, json_filename in splits:
         img_dir = os.path.join(apricot_dir, "Images", split_name)
@@ -45,18 +41,17 @@ def parse_and_extract(apricot_dir="data/apricot", output_data_dir="data"):
         with open(ann_path) as f:
             data = json.load(f)
 
-        # Build image_id -> file_name mapping
         img_map = {img['id']: img['file_name'] for img in data.get('images', [])}
         
-        # Group annotations by image_id
         anns_by_img = {}
         for ann in data.get('annotations', []):
-            iid = ann['image_id']
-            if iid not in anns_by_img:
-                anns_by_img[iid] = []
-            anns_by_img[iid].append(ann)
+            if ann.get('category_id') == 12:  # Category 12 is 'adversarial patch'
+                iid = ann['image_id']
+                if iid not in anns_by_img:
+                    anns_by_img[iid] = []
+                anns_by_img[iid].append(ann)
 
-        print(f"[*] Extracting crops from {len(anns_by_img)} images in {split_name}...")
+        print(f"[*] Extracting physical patch crops from {len(anns_by_img)} images in {split_name}...")
         for img_id, anns in tqdm(anns_by_img.items()):
             file_name = img_map.get(img_id)
             if not file_name:
@@ -73,15 +68,15 @@ def parse_and_extract(apricot_dir="data/apricot", output_data_dir="data"):
             h, w = img.shape[:2]
 
             for idx, ann in enumerate(anns):
-                bbox = ann.get('bbox') # [x, y, width, height]
+                bbox = ann.get('bbox')
                 if not bbox or len(bbox) < 4:
                     continue
 
-                bx, by, bw, bh = map(int, bbox)
+                bx, by, bw_val, bh_val = map(int, bbox)
                 bx1 = max(0, bx)
                 by1 = max(0, by)
-                bx2 = min(w, bx + bw)
-                by2 = min(h, by + bh)
+                bx2 = min(w, bx + bw_val)
+                by2 = min(h, by + bh_val)
 
                 if bx2 <= bx1 or by2 <= by1 or (bx2 - bx1) < 10 or (by2 - by1) < 10:
                     continue
@@ -90,37 +85,17 @@ def parse_and_extract(apricot_dir="data/apricot", output_data_dir="data"):
                 roi_resized = cv2.resize(roi, (128, 128))
                 tensor_4ch = build_4ch_tensor(roi_resized)
 
-                cat_id = ann.get('category_id')
                 base_id = f"apricot_{split_name}_{img_id}_{idx}"
-
-                if cat_id == 12: # Category 12 is 'adversarial patch'
-                    cv2.imwrite(os.path.join(attack_out, f"{base_id}.jpg"), roi_resized)
-                    np.save(os.path.join(prep_attack, f"{base_id}.npy"), tensor_4ch)
-                    total_attacks += 1
-                else: # Clean object crop
-                    cv2.imwrite(os.path.join(clean_out, f"{base_id}.jpg"), roi_resized)
-                    np.save(os.path.join(prep_clean, f"{base_id}.npy"), tensor_4ch)
-                    total_cleans += 1
-
-                # Extract a clean background crop outside the patch bbox for balance
-                if cat_id == 12:
-                    bg_y1 = max(0, by1 - bh if by1 - bh >= 0 else by2)
-                    bg_y2 = min(h, bg_y1 + bh)
-                    if bg_y2 > bg_y1 and bx2 > bx1:
-                        bg_roi = img[bg_y1:bg_y2, bx1:bx2]
-                        if bg_roi.shape[0] >= 10 and bg_roi.shape[1] >= 10:
-                            bg_resized = cv2.resize(bg_roi, (128, 128))
-                            bg_tensor = build_4ch_tensor(bg_resized)
-                            cv2.imwrite(os.path.join(clean_out, f"{base_id}_bg.jpg"), bg_resized)
-                            np.save(os.path.join(prep_clean, f"{base_id}_bg.npy"), bg_tensor)
-                            total_cleans += 1
+                cv2.imwrite(os.path.join(attack_out, f"{base_id}.jpg"), roi_resized)
+                np.save(os.path.join(prep_attack, f"{base_id}.npy"), tensor_4ch)
+                total_attacks += 1
 
     print("\n=========================================================================")
-    print("           REAL APRICOT DATASET EXTRACTION COMPLETE                     ")
+    print("           REAL APRICOT PHYSICAL PATCH EXTRACTION COMPLETE               ")
     print("=========================================================================")
-    print(f"  • Extracted Clean ROIs:       {total_cleans}")
     print(f"  • Extracted Physical Patches: {total_attacks}")
-    print(f"  • Saved 4ch Tensors to:       data/preprocessed/")
+    print(f"  • Saved 4ch Tensors to:       data/preprocessed/attack")
+    print("  • NOTE: Zero same-image background crops were extracted to prevent leakage.")
     print("=========================================================================\n")
 
 

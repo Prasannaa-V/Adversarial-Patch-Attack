@@ -1,13 +1,16 @@
 """
 inference/mqtt_client.py
-Paho MQTT wrapper for InfraEdge-Shield inference pipeline.
-Publishes attack alerts and heartbeats; subscribes to override commands.
+Paho MQTT wrapper for Smart Gate inference pipeline with Zero-Trust HMAC Attestation.
+Publishes attack alerts and heartbeats with HMAC-SHA256 signature; subscribes to override commands.
 """
 
 import json
 import logging
 import threading
 import time
+import hmac
+import hashlib
+import os
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -15,19 +18,39 @@ import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)
 
+# Shared secret key for Zero-Trust Edge Attestation (HMAC-SHA256)
+HMAC_SHARED_SECRET = os.getenv("HMAC_SHARED_SECRET", "smartgate_zero_trust_hmac_secret_2026").encode("utf-8")
+
+
+def generate_payload_signature(payload_dict: dict) -> str:
+    """Generates HMAC-SHA256 signature over sorted JSON payload keys."""
+    # Exclude any pre-existing signature field
+    filtered = {k: v for k, v in payload_dict.items() if k != "hmac_sig"}
+    canonical = json.dumps(filtered, sort_keys=True)
+    return hmac.new(HMAC_SHARED_SECRET, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_payload_signature(payload_dict: dict) -> bool:
+    """Verifies HMAC-SHA256 signature on incoming MQTT message."""
+    received_sig = payload_dict.get("hmac_sig", "")
+    if not received_sig:
+        return False
+    expected_sig = generate_payload_signature(payload_dict)
+    return hmac.compare_digest(received_sig, expected_sig)
+
 
 class MQTTClient:
     """
-    Thread-safe MQTT client for the inference pipeline.
+    Thread-safe MQTT client for the inference pipeline with Zero-Trust HMAC Attestation.
     Auto-reconnects on disconnect. QoS 1 for safety-critical messages.
     """
 
     TOPICS = {
-        "attack_alert": "infraedge/attack_alert",
-        "attack_ack":   "infraedge/attack_ack",
-        "override":     "infraedge/override",
-        "heartbeat":    "infraedge/heartbeat",
-        "status":       "infraedge/status",
+        "attack_alert": "smartgate/attack_alert",
+        "attack_ack":   "smartgate/attack_ack",
+        "override":     "smartgate/override",
+        "heartbeat":    "smartgate/heartbeat",
+        "status":       "smartgate/status",
     }
 
     def __init__(
@@ -45,7 +68,7 @@ class MQTTClient:
         self._lock = threading.Lock()
 
         self._client = mqtt.Client(
-            client_id="infraedge_pipeline",
+            client_id="smartgate_pipeline",
             protocol=mqtt.MQTTv311,
             clean_session=True,
         )
@@ -66,35 +89,40 @@ class MQTTClient:
 
     def publish_alert(self, confidence: float, frame_id: str, frame_path: str = "") -> bool:
         """
-        Publish an adversarial patch attack alert.
+        Publish an adversarial patch attack alert with HMAC-SHA256 signature.
         QoS 1 — guaranteed delivery to ESP32 and dashboard.
         """
-        payload = json.dumps({
+        raw_payload = {
             "confidence": round(confidence, 4),
             "frame_id": frame_id,
             "frame_path": frame_path,
             "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        }
+        raw_payload["hmac_sig"] = generate_payload_signature(raw_payload)
+        payload = json.dumps(raw_payload)
+
         result = self._client.publish(
             self.TOPICS["attack_alert"], payload, qos=1, retain=False
         )
         ok = result.rc == mqtt.MQTT_ERR_SUCCESS
         if ok:
-            logger.info(f"Attack alert published (conf={confidence:.3f}, frame={frame_id})")
+            logger.info(f"Attested attack alert published (conf={confidence:.3f}, frame={frame_id})")
         else:
             logger.error(f"Failed to publish alert: rc={result.rc}")
         return ok
 
     def publish_heartbeat(self, fps: float, sdnl_latency_ms: float) -> bool:
         """
-        Publish heartbeat every 5 seconds. QoS 0 (fire-and-forget).
-        ESP32 watchdog resets on receipt; auto-locks if silent for 15s.
+        Publish authenticated heartbeat every 5 seconds. QoS 0.
         """
-        payload = json.dumps({
+        raw_payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "fps": round(fps, 1),
             "sdnl_latency_ms": round(sdnl_latency_ms, 1),
-        })
+        }
+        raw_payload["hmac_sig"] = generate_payload_signature(raw_payload)
+        payload = json.dumps(raw_payload)
+
         result = self._client.publish(
             self.TOPICS["heartbeat"], payload, qos=0, retain=False
         )
@@ -107,7 +135,6 @@ class MQTTClient:
         if rc == 0:
             self._connected = True
             logger.info("MQTT connected to broker")
-            # Subscribe to override commands from dashboard
             client.subscribe(self.TOPICS["override"], qos=1)
             client.subscribe(self.TOPICS["attack_ack"], qos=1)
             logger.info(f"Subscribed to: {self.TOPICS['override']}, {self.TOPICS['attack_ack']}")
@@ -124,10 +151,15 @@ class MQTTClient:
         try:
             payload = json.loads(msg.payload.decode())
         except json.JSONDecodeError:
-            payload = msg.payload.decode()
+            logger.warning("Failed to decode MQTT JSON payload")
+            return
+
+        if isinstance(payload, dict) and not verify_payload_signature(payload):
+            logger.warning(f"[ZERO-TRUST REJECT] Message on {topic} failed HMAC-SHA256 signature attestation!")
+            return
 
         if topic == self.TOPICS["override"] and self._override_callback:
-            logger.info(f"Override command received: {payload}")
+            logger.info(f"Attested override command received: {payload}")
             self._override_callback(payload)
         elif topic == self.TOPICS["attack_ack"]:
             logger.info(f"ESP32 ACK received: {payload}")

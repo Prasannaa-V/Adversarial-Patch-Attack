@@ -15,6 +15,61 @@
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <Ticker.h>
+#include <mbedtls/md.h>
+#include <vector>
+#include <algorithm>
+
+// ── Shared Secret for Zero-Trust HMAC-SHA256 Attestation ──────────────────────
+const char* HMAC_SECRET_KEY = "smartgate_zero_trust_hmac_secret_2026";
+
+bool verifyPayloadHmac(const JsonObject& doc) {
+  if (!doc.containsKey("hmac_sig")) return false;
+  String receivedSig = doc["hmac_sig"].as<String>();
+
+  std::vector<String> keys;
+  for (JsonPair kv : doc) {
+    String k = kv.key().c_str();
+    if (k != "hmac_sig") {
+      keys.push_back(k);
+    }
+  }
+  std::sort(keys.begin(), keys.end());
+
+  String canonical = "{";
+  for (size_t i = 0; i < keys.size(); i++) {
+    if (i > 0) canonical += ",";
+    String k = keys[i];
+    canonical += "\"" + k + "\":";
+    if (doc[k].is<JsonString>()) {
+      canonical += "\"" + doc[k].as<String>() + "\"";
+    } else if (doc[k].is<float>() || doc[k].is<double>()) {
+      char fbuf[32];
+      snprintf(fbuf, sizeof(fbuf), "%.4f", doc[k].as<float>());
+      canonical += String(fbuf);
+    } else {
+      canonical += doc[k].as<String>();
+    }
+  }
+  canonical += "}";
+
+  byte hmacResult[32];
+  mbedtls_md_context_t ctx;
+  mbedtls_md_type_t md_type = MBEDTLS_MD_SHA256;
+  mbedtls_md_init(&ctx);
+  mbedtls_md_setup(&ctx, mbedtls_md_info_from_type(md_type), 1);
+  mbedtls_md_hmac_starts(&ctx, (const unsigned char*)HMAC_SECRET_KEY, strlen(HMAC_SECRET_KEY));
+  mbedtls_md_hmac_update(&ctx, (const unsigned char*)canonical.c_str(), canonical.length());
+  mbedtls_md_hmac_finish(&ctx, hmacResult);
+  mbedtls_md_free(&ctx);
+
+  char calculatedSig[65];
+  for (int i = 0; i < 32; i++) {
+    sprintf(&calculatedSig[i * 2], "%02x", hmacResult[i]);
+  }
+  calculatedSig[64] = '\0';
+
+  return receivedSig.equalsIgnoreCase(calculatedSig);
+}
 
 // ── WiFi Credentials ─────────────────────────────────────────────────────────
 // EDIT THESE before flashing
@@ -28,18 +83,18 @@
 #define MQTT_CLIENT_ID   "infraedge_esp32"
 
 // ── GPIO Pins ─────────────────────────────────────────────────────────────────
-#define RELAY_PIN     26   // Gate lock relay (HIGH = LOCKED)
+#define RELAY_PIN     26   // Gate lock relay (LOW = de-energized = LOCKED; HIGH = energized = UNLOCKED for fail-secure posture)
 #define LED_RED       27   // Attack alert indicator (5 Hz flash)
 #define BUZZER_PIN    25   // Alarm tone (880 Hz PWM)
 #define LED_GREEN     32   // System healthy indicator
-#define OVERRIDE_BTN  34   // Manual override pushbutton (INPUT_PULLUP)
+#define OVERRIDE_BTN  33   // Manual override pushbutton (GPIO33 supports internal INPUT_PULLUP)
 
 // ── MQTT Topics ───────────────────────────────────────────────────────────────
-const char* TOPIC_ALERT     = "infraedge/attack_alert";
-const char* TOPIC_ACK       = "infraedge/attack_ack";
-const char* TOPIC_OVERRIDE  = "infraedge/override";
-const char* TOPIC_HEARTBEAT = "infraedge/heartbeat";
-const char* TOPIC_STATUS    = "infraedge/status";
+const char* TOPIC_ALERT     = "smartgate/attack_alert";
+const char* TOPIC_ACK       = "smartgate/attack_ack";
+const char* TOPIC_OVERRIDE  = "smartgate/override";
+const char* TOPIC_HEARTBEAT = "smartgate/heartbeat";
+const char* TOPIC_STATUS    = "smartgate/status";
 
 // ── State Machine ─────────────────────────────────────────────────────────────
 enum SystemState { IDLE, LOCKED, OVERRIDE_UNLOCKED };
@@ -160,8 +215,15 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       Serial.println("[ERROR] JSON parse failed for attack_alert");
       return;
     }
+
+    JsonObject obj = doc.as<JsonObject>();
+    if (!verifyPayloadHmac(obj)) {
+      Serial.println("[ZERO-TRUST REJECT] attack_alert failed HMAC-SHA256 signature attestation!");
+      return;
+    }
+
     float confidence = doc["confidence"] | 0.0f;
-    Serial.printf("[ATTACK] Confirmed! confidence=%.3f\n", confidence);
+    Serial.printf("[ATTACK] Attested Alert Confirmed! confidence=%.3f\n", confidence);
     activateLock();
     lockStartMs = millis();
     publishACK();
@@ -172,6 +234,12 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     StaticJsonDocument<128> doc;
     DeserializationError err = deserializeJson(doc, payloadStr);
     if (err) return;
+
+    JsonObject obj = doc.as<JsonObject>();
+    if (!verifyPayloadHmac(obj)) {
+      Serial.println("[ZERO-TRUST REJECT] override command failed HMAC-SHA256 signature attestation!");
+      return;
+    }
 
     String action = doc["action"] | "lock";
     if (action == "unlock") {
@@ -197,24 +265,24 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
 
 
 // =============================================================================
-// Gate Control
+// Gate Control (Fail-Secure Posture: De-Energized LOW = LOCKED)
 // =============================================================================
 void activateLock() {
-  digitalWrite(RELAY_PIN, HIGH);   // Energize relay → gate locked
+  digitalWrite(RELAY_PIN, LOW);    // De-energized coil (LOW) → Gate physically LOCKED (Fail-Secure)
   currentState = LOCKED;
   lockStartMs = millis();
   startLedFlash();
   startBuzzer();                   // Non-blocking 880 Hz tone; stopped by checkBuzzer()
-  Serial.println("[GATE] LOCKED — Relay HIGH, LED flashing");
+  Serial.println("[GATE] LOCKED — Relay de-energized LOW (Fail-Secure)");
 }
 
 void deactivateLock() {
-  digitalWrite(RELAY_PIN, LOW);    // De-energize relay → gate unlocked
+  digitalWrite(RELAY_PIN, HIGH);   // Energized coil (HIGH) → Gate UNLOCKED (Energize-to-Release)
   currentState = IDLE;
   stopLedFlash();
   stopBuzzer();                    // Silence alarm when the gate is released
   digitalWrite(LED_RED, LOW);
-  Serial.println("[GATE] UNLOCKED — Relay LOW");
+  Serial.println("[GATE] UNLOCKED — Relay energized HIGH");
 }
 
 
@@ -314,7 +382,7 @@ void checkLockoutTimer() {
 
 
 // =============================================================================
-// Manual Override Button (GPIO 34 INPUT_PULLUP)
+// Manual Override Button (GPIO 33 INPUT_PULLUP)
 // Debounced: short press (<1s) = toggle gate
 // =============================================================================
 bool lastBtnState = HIGH;

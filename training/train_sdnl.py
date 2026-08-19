@@ -118,6 +118,12 @@ def tune_confidence_threshold(val_targets, val_probs, target_fpr=0.05):
 
 # ── Training Loop ─────────────────────────────────────────────────────────────
 def train(args):
+    # Set random seeds for 100% reproducibility
+    np.random.seed(42)
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
+
     print(f"=== Starting SDNL ({args.in_channels}-Channel) Model Training ===")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")

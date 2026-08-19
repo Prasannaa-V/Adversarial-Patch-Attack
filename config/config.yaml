@@ -6,7 +6,7 @@ inference:
   camera_url: ""           # Set to rtsp://... or http://... for IP camera (overrides index)
   yolo_model: "yolov8n.pt" # Auto-downloaded by ultralytics on first run
   sdnl_model: "models/sdnl/sdnl_v1.onnx"   # Path to trained ONNX model (primary edge backend; see inference/sdnl.py)
-  sdnl_threshold: 0.85     # Attack detection threshold (0.0 - 1.0)
+  sdnl_threshold: 0.70     # Attack detection threshold (0.0 - 1.0)
   frame_width: 640
   frame_height: 640
   fps_target: 20
@@ -16,11 +16,11 @@ mqtt:
   broker_port: 1883
   keepalive: 60
   topics:
-    attack_alert: "infraedge/attack_alert"
-    attack_ack:   "infraedge/attack_ack"
-    override:     "infraedge/override"
-    heartbeat:    "infraedge/heartbeat"
-    status:       "infraedge/status"
+    attack_alert: "smartgate/attack_alert"
+    attack_ack:   "smartgate/attack_ack"
+    override:     "smartgate/override"
+    heartbeat:    "smartgate/heartbeat"
+    status:       "smartgate/status"
 
 backend:
   host: "localhost"
@@ -29,7 +29,7 @@ backend:
 
 storage:
   frames_dir: "data/frames"
-  max_frames_days: 90      # Auto-cleanup frames older than this
+  max_frames_days: 7       # Auto-cleanup frames older than 7 days
 
 esp32:
   heartbeat_interval_s: 5

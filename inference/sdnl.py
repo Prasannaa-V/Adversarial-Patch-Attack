@@ -21,25 +21,27 @@ from typing import Tuple
 logger = logging.getLogger(__name__)
 
 
-def build_4ch_tensor(roi_rgb: np.ndarray) -> np.ndarray:
+def build_4ch_tensor(roi_bgr: np.ndarray) -> np.ndarray:
     """
-    Build 4-channel input tensor from a 128x128 RGB ROI.
+    Build 4-channel input tensor from a 128x128 BGR ROI.
       Ch 1-3: Normalized RGB (float32, 0-1)
-      Ch 4:   DCT high-frequency map (float32, 0-1)
+      Ch 4:   2D DCT high-frequency spatial spectrum map (float32, 0-1)
 
     Args:
-        roi_rgb: np.ndarray, shape (128, 128, 3), uint8, BGR or RGB
+        roi_bgr: np.ndarray, shape (128, 128, 3), uint8 BGR image crop
 
     Returns:
         tensor: np.ndarray, shape (128, 128, 4), float32
     """
-    roi = cv2.resize(roi_rgb, (128, 128))
-    rgb = roi.astype(np.float32) / 255.0  # (128, 128, 3)
+    roi = cv2.resize(roi_bgr, (128, 128))
+    # Explicit BGR to RGB conversion for model compatibility
+    roi_rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+    rgb = roi_rgb.astype(np.float32) / 255.0  # (128, 128, 3)
 
-    # Grayscale for frequency analysis
+    # Grayscale for 2D Discrete Cosine Transform (DCT) frequency analysis
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY).astype(np.float32)
 
-    # 2D DCT — extract high-frequency top-right quadrant
+    # 2D DCT — extract high-frequency 2D spatial spectrum quadrant (bottom-right: high horizontal & vertical frequencies)
     dct = cv2.dct(gray)
     high_freq = np.zeros_like(dct)
     h, w = dct.shape
