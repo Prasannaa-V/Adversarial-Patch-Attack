@@ -1,163 +1,127 @@
-> ⚠️ **SUPERSEDED (2026-08-18).** This document describes the original **RPi 4B + OAK-D
-> stereo-depth** design, which has been abandoned. The system is now a **single PC/laptop +
-> ESP32** build with a generic USB/RTSP camera (no depth). For the current state see
-> **`docs/session_starter.md`** and **`docs/progress.md`**; `docs/paper_sections.md` remains
-> authoritative for the paper. Kept for historical reference only — do not implement from this file.
+# 📋 PROJECT PLANS & ROADMAP
 
----
+## Smart Infrastructure Cyber-Physical Access Control System — Technical Roadmap
 
-# 📋 PROJECT PLANS
-## InfraEdge-Shield — Full Roadmap & Milestone Plan
+_Last updated: 2026-08-19. Aligned with current codebase, `docs/session_starter.md`, `docs/progress.md`, and `docs/paper_sections.md`._
 
 ---
 
 ## 1. Project Overview
 
-**Problem:** Smart infrastructure (parking gates, secure entryways) uses edge-deployed CV models that are critically vulnerable to physical adversarial patch attacks — printed visual patterns that cause misclassification or target blindness — with no cloud-independent, hardware-level failsafe defense.
+**Problem:** Smart infrastructure (parking gates, secure entryways, access control points) relies heavily on edge-deployed computer vision models that are critically vulnerable to physical adversarial patch attacks — printed visual patterns that manipulate primary object detectors into misclassifying authorized subjects or inducing target blindness — with no cloud-independent, hardware-level failsafe defense.
 
-**Proposed Solution:** A dual-model edge architecture:
-- **Primary:** YOLOv8n (person/vehicle detection)
-- **Secondary:** Lightweight SDNL CNN (adversarial patch anomaly detection)
-- **Failsafe:** ESP32 → relay → gate lock (MQTT-triggered, <200ms end-to-end)
-- **Dashboard:** Full-featured React + Node.js (live stream, attack gallery, analytics)
+**Proposed Solution:** A lightweight dual-model edge architecture:
+- **Primary Detector:** YOLOv8n running locally via OpenCV (person/vehicle detection).
+- **Secondary Layer (SDNL):** Custom sub-500K parameter 4-channel CNN (RGB + 2D DCT high-frequency spatial spectrum map `[h//2:, w//2:]`) for detecting adversarial patch noise signatures in < 2 ms.
+- **Hardware-in-the-Loop Failsafe:** ESP32 microcontroller with Zero-Trust HMAC-SHA256 payload attestation → 5V relay → 12V electromagnetic gate lock (de-energized LOW = LOCKED fail-secure posture, < 60 ms response time).
+- **Security Dashboard:** Full-featured React 19 + Node.js + Express + Socket.IO + SQLite application with live telemetry, incident gallery, JWT operator authentication (`/api/auth/login`), and manual override controls.
 
-**Camera:** OAK-D Stereo Camera (with onboard MyriadX NPU for accelerated primary detection)
+**Camera / Sensor:** Generic USB Webcam / RTSP IP Camera stream (no proprietary stereo-depth hardware dependency).
 
-**Dataset:** APDE (94K images, 94 patch types, ICCV 2025) + APRICOT for evaluation
-
----
-
-## 2. Novelty Claims (Patent + Publication)
-
-| # | Claim | Type |
-|---|---|---|
-| N1 | Dual-concurrent model (primary detector + SDNL) on IoT-class edge device | System |
-| N2 | SDNL trained on high-frequency spatial anomaly maps for physical patch detection | Method |
-| N3 | Hardware-in-loop: CV detection → MQTT → ESP32 → physical gate lock (<200ms) | System |
-| N4 | Stereo camera depth data as additional anomaly signal (depth inconsistency of flat patches) | Method |
-| N5 | Real-time attack frame streaming to full-featured security dashboard with analytics | System |
+**Dataset:** Unpolluted independent dataset split (200 independent clean crops from COCO val2017 + 873 physical adversarial patch crops from APRICOT v1.0, zero image-level overlap).
 
 ---
 
-## 3. Publication & Patent Strategy
+## 2. Novelty Claims & Contributions
 
-```
-Month 1-4  →  Build + Experiment + Collect Results
-Month 4    →  Draft Provisional Patent Application (India + PCT)
-Month 4-5  →  Write Paper (IEEE format, 8-12 pages)
-Month 5    →  Submit to:
-               PRIMARY:   IEEE Transactions on IoT (IF ~8.2)
-               BACKUP:    IEEE Internet of Things Magazine
-               CONFERENCE: USENIX Security / IEEE EDGE 2026
-Month 6+   →  Full patent prosecution (engage patent attorney)
-```
-
-> **Why patent first?** Provisional patent filing establishes a priority date (12-month window) before public disclosure. This protects N1–N5 while allowing academic publication.
-
-**Patentable Claims (Utility Patent — Indian Patent Office + PCT):**
-1. A system for edge-based adversarial patch detection using concurrent dual-model inference with hardware failsafe coupling
-2. Method for lightweight high-frequency spatial anomaly detection in real-time video streams from stereo cameras for adversarial patch identification
-3. A cyber-physical security architecture where computer vision adversarial detection directly triggers microcontroller-level physical access control without cloud dependency
+| # | Claim | Type | Status |
+|---|---|---|---|
+| N1 | Dual-concurrent model (primary YOLOv8n detector + sub-500K SDNL) running locally on edge host without cloud dependence | System | ✅ Implemented & Benchmarked |
+| N2 | SDNL trained on 4-channel spatial-frequency tensors (RGB + 2D DCT spectrum map) for physical patch detection | Method | ✅ Implemented & Retrained |
+| N3 | Hardware-in-the-loop: CV detection → Zero-Trust HMAC MQTT → ESP32 mbedTLS → de-energized fail-secure relay lock (< 60 ms) | System | ✅ Implemented & Attested |
+| N4 | Edge security dashboard with live telemetry, JWT operator auth (`/api/auth/login`), SQLite deduplication, and manual override | System | ✅ Operational |
+| N5 | Empirical performance validation on unpolluted independent clean COCO vs physical patch APRICOT test set (96.27% accuracy, 1.66 ms ONNX CPU latency) | Benchmark | ✅ Verified |
 
 ---
 
-## 4. Milestone Timeline (20 Weeks Total)
+## 3. Milestone Timeline & Execution Status
 
-| Milestone | Duration | Week | Deliverable | Status |
-|---|---|---|---|---|
-| **M0** | Planning + Lit Survey | Wk 1-2 | `docs/` files, literature table | ✅ DONE |
-| **M1** | Environment Setup | Wk 2-3 | Python env, OAK-D SDK, dataset downloaded | ⬜ TODO |
-| **M2** | Dataset Prep + EDA | Wk 3-4 | Cleaned dataset, train/val/test splits, frequency maps | ⬜ TODO |
-| **M3** | SDNL Design + Training | Wk 5-7 | Trained SDNL model, ≥92% accuracy, <15ms on RPi | ⬜ TODO |
-| **M4** | Primary Detector Integration | Wk 7-8 | YOLOv8n TFLite on OAK-D/RPi running at ≥20 FPS | ⬜ TODO |
-| **M5** | Dual-Model Pipeline | Wk 8-9 | End-to-end: camera → detect → diagnose → alert | ⬜ TODO |
-| **M6** | ESP32 Failsafe | Wk 9-10 | MQTT protocol, relay wired, gate lock tested | ⬜ TODO |
-| **M7** | Dashboard — Backend | Wk 10-11 | Node.js + Socket.IO + REST API + SQLite | ⬜ TODO |
-| **M8** | Dashboard — Frontend | Wk 11-13 | React live stream, alert gallery, analytics, override | ⬜ TODO |
-| **M9** | Full Integration | Wk 13-14 | All components live; end-to-end test on physical setup | ⬜ TODO |
-| **M10** | Benchmarking + Ablation | Wk 14-16 | Latency, accuracy, FPS, confusion matrix, ROC curves | ⬜ TODO |
-| **M11** | Provisional Patent | Wk 16 | Filed with IP attorney / Patent office | ⬜ TODO |
-| **M12** | Paper Writing | Wk 16-19 | Draft → review → final manuscript | ⬜ TODO |
-| **M13** | Journal Submission | Wk 20 | IEEE Transactions on IoT (or USENIX Security) | ⬜ TODO |
+| Milestone | Description | Deliverable | Status |
+|---|---|---|---|
+| **M0** | Planning + Lit Survey | `docs/` files, literature review table | ✅ COMPLETED |
+| **M1** | Environment Setup | Python virtual environment, dependencies, dataset directories | ✅ COMPLETED |
+| **M2** | Unpolluted Dataset Preparation | `prepare_clean_independent_dataset.py` (purged stale tensors; 200 COCO clean + 873 APRICOT attack) | ✅ COMPLETED |
+| **M3** | SDNL Training & ONNX Export | Trained 4-channel MobileNetV3-Small (`train_sdnl.py`), exported ONNX graph (`sdnl_v1.onnx`) | ✅ COMPLETED |
+| **M4** | Primary Detector Integration | YOLOv8n integration in `inference/detector.py` with CPU fallback | ✅ COMPLETED |
+| **M5** | Multi-Threaded Pipeline | `inference/pipeline.py` (Reader → SDNL Worker → Alert Publisher) with thread locks & async POST | ✅ COMPLETED |
+| **M6** | ESP32 Hardware Failsafe | `esp32/firmware/src/main.cpp` (PlatformIO, de-energized LOW = LOCKED, mbedTLS HMAC verification, 15s watchdog) | ✅ COMPLETED |
+| **M7** | Dashboard Backend | Node.js + Express + Socket.IO + SQLite with `UNIQUE(frame_id)` deduplication & JWT auth | ✅ COMPLETED |
+| **M8** | Dashboard Frontend | React 19 + Vite dashboard (`dashboard/frontend/src/App.jsx`) with live telemetry & override controls | ✅ COMPLETED |
+| **M9** | Latency Benchmarking | `training/benchmark_sdnl.py` on real ROI tensors (1.66 ms ONNX CPU latency) | ✅ COMPLETED |
+| **M10** | Technical Documentation & Paper | `docs/paper_sections.md` updated with verified empirical metrics & fail-secure relay specs | ✅ COMPLETED |
 
 ---
 
-## 5. Project Directory Structure
+## 4. Actual Project Directory Structure
 
 ```
 /home/prasannaa/Projects/p1/
-├── docs/                        # All planning context files
-│   ├── session_starter.md
-│   ├── plans.md                 ← YOU ARE HERE
-│   ├── architecture_plan.md
-│   ├── build_plan.md
-│   ├── progress.md
-│   ├── feasibility.md
-│   └── setup.md
+├── docs/                        # Technical documentation & planning
+│   ├── paper_sections.md        # Authoritative capstone technical paper & specification
+│   ├── session_starter.md      # Grounding summary & system state
+│   ├── progress.md             # Verified task completion log & empirical metrics
+│   ├── plans.md                # Project roadmap & milestone plan (THIS FILE)
+│   └── diagram_sources.md      # PlantUML & Eraser.io architecture diagram sources
 │
-├── data/                        # Datasets
-│   ├── apde/                    # APDE 94K dataset (ICCV 2025)
-│   ├── apricot/                 # APRICOT physical patches
-│   ├── processed/               # Train/val/test splits
-│   └── frequency_maps/         # DCT/FFT computed maps
+├── data/                        # Datasets & preprocessed tensors (ignored in git)
+│   ├── apricot/                 # APRICOT physical patch dataset
+│   ├── coco_clean/              # COCO val2017 independent clean images
+│   ├── crops/                   # Extracted 128x128 crop images (clean/ & attack/)
+│   ├── preprocessed/            # 4-channel float32 .npy tensors (clean/ & attack/)
+│   └── frames/                  # Flagged incident snapshot images
 │
-├── models/                      # Trained model files
-│   ├── sdnl/                    # Secondary Diagnostic Neural Layer
-│   │   ├── sdnl_v1.pt           # PyTorch checkpoint
-│   │   └── sdnl_v1.tflite       # Edge-optimized TFLite
-│   └── primary/
-│       └── yolov8n_infraedge.pt # Fine-tuned YOLOv8n
+├── models/                      # Trained model files (ignored in git)
+│   └── sdnl/
+│       ├── sdnl_v1.pt           # PyTorch checkpoint
+│       └── sdnl_v1.onnx         # Primary ONNX CPU inference model
 │
-├── edge/                        # Edge node Python code
-│   ├── pipeline.py              # Main dual-model pipeline
-│   ├── sdnl_infer.py            # SDNL inference module
-│   ├── yolo_infer.py            # Primary detector module
-│   ├── mqtt_client.py           # MQTT alert publisher
-│   └── stream.py                # Camera/video streaming
+├── inference/                   # Python inference pipeline
+│   ├── detector.py              # YOLOv8n primary detector module
+│   ├── sdnl.py                  # 4-channel tensor builder & ONNX/PyTorch classifier
+│   ├── pipeline.py              # 3-thread pipeline (reader, worker, publisher)
+│   ├── mqtt_client.py           # Zero-Trust HMAC-SHA256 MQTT client wrapper
+│   └── frame_store.py           # Flagged frame saver & 7-day rolling disk cleanup
 │
-├── embedded/                    # ESP32 firmware
-│   ├── esp32_failsafe/
-│   │   ├── src/main.cpp         # Main firmware
-│   │   └── platformio.ini       # PlatformIO config
+├── esp32/                       # ESP32 failsafe firmware
+│   └── firmware/
+│       ├── src/main.cpp         # Arduino C++ firmware (mbedTLS HMAC, LOW=LOCKED fail-secure)
+│       └── platformio.ini       # PlatformIO build configuration
 │
-├── dashboard/                   # Security dashboard
-│   ├── backend/                 # Node.js + Express + Socket.IO
-│   │   ├── server.js
-│   │   ├── routes/
-│   │   └── db/
-│   └── frontend/                # React app
-│       ├── src/
-│       │   ├── App.jsx
-│       │   ├── components/
-│       │   └── pages/
+├── dashboard/                   # Web security dashboard
+│   ├── backend/                 # Node.js + Express + Socket.IO + SQLite
+│   │   ├── server.js            # Express server entry point
+│   │   ├── routes/              # REST API routes (auth.js, gate.js, events.js, stats.js)
+│   │   ├── services/            # Services (db.js, mqtt_bridge.js with HMAC signing)
+│   │   └── db/schema.sql        # SQLite schema with UNIQUE(frame_id)
+│   └── frontend/                # React 19 + Vite dashboard
+│       └── src/App.jsx          # React single-page dashboard application
 │
-├── training/                    # Model training scripts
-│   ├── train_sdnl.py
-│   ├── data_preprocessing.py
-│   ├── augmentation.py
-│   └── evaluate.py
+├── training/                    # Model training & benchmark scripts
+│   ├── train_sdnl.py            # SDNL training script (seed=42, CrossEntropy, ONNX export)
+│   ├── parse_apricot.py         # APRICOT physical patch crop extractor
+│   ├── download_real_clean_coco.py # COCO val2017 clean downloader & tensor builder
+│   ├── prepare_clean_independent_dataset.py # Disk purge & unpolluted dataset builder
+│   └── benchmark_sdnl.py        # Latency benchmark on real ROI tensors
 │
-├── experiments/                 # Experiment logs and results
-│   ├── results/
-│   └── plots/
+├── config/                      # System configuration
+│   └── config.yaml              # YAML config file (smartgate/* topics, 7-day retention)
 │
-└── paper/                       # Research paper drafts
-    ├── draft_v1.tex
-    ├── figures/
-    └── references.bib
+└── .gitignore                   # Git ignore file (venv, models, datasets, images, db, logs)
 ```
 
 ---
 
-## 6. Success Metrics
+## 5. Verified Success Metrics & Empirical Baseline
 
-| Metric | Target |
-|---|---|
-| SDNL Detection Accuracy | ≥ 92% on APDE test set |
-| SDNL False Positive Rate | ≤ 5% on clean frames |
-| SDNL Inference Time (RPi 4B) | ≤ 15 ms per ROI |
-| End-to-End Latency (camera → ESP32 relay) | ≤ 200 ms |
-| Primary Detector FPS (YOLOv8n, OAK-D) | ≥ 20 FPS |
-| Dashboard Refresh Rate | Real-time (≤ 500ms via WebSocket) |
-| Paper Acceptance | Top-tier IEEE journal or USENIX-class conference |
-| Patent | Provisional filed before first public submission |
+| Metric | Target | Verified Empirical Result | Status |
+|---|---|---|---|
+| SDNL Test Accuracy | ≥ 92% | **96.27%** on unpolluted test set | ✅ PASS |
+| SDNL Test Precision | ≥ 90% | **100.00%** (0.00% FPR on clean COCO crops) | ✅ PASS |
+| SDNL Test Recall | ≥ 90% | **95.42%** on physical APRICOT patch crops | ✅ PASS |
+| SDNL F1-Score | ≥ 0.90 | **0.9766** | ✅ PASS |
+| SDNL ROC-AUC | ≥ 0.95 | **0.9880** | ✅ PASS |
+| SDNL ROI ONNX Latency (CPU) | ≤ 15 ms | **1.66 ms** per ROI crop (P95: 2.58 ms) | ✅ PASS |
+| End-to-End Latency (Camera → ESP32 Relay) | ≤ 200 ms | **< 60 ms** hardware actuation | ✅ PASS |
+| System Throughput | ≥ 15 FPS | **20+ FPS** multi-threaded pipeline | ✅ PASS |
+| Hardware Security Posture | Fail-Secure | **De-energized LOW = LOCKED** on MCU reset | ✅ PASS |
+| Messaging Security | Attested | **Zero-Trust HMAC-SHA256** (Python, JS, ESP32 mbedTLS) | ✅ PASS |
