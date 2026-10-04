@@ -296,6 +296,10 @@ Communication between the edge host and hardware actuator relies on an embedded 
 
 The hardware failsafe incorporates an independent watchdog mechanism to handle host network or software failures. The edge pipeline publishes heartbeat messages to `smartgate/heartbeat` every 5 seconds. The ESP32 monitors heartbeat timestamps; if no heartbeat arrives within 15 seconds, the microcontroller state machine automatically defaults to the LOCKED state, enforcing a fail-secure posture that prevents unauthorized entry during system outages.
 
+## 9.2 Use Case System Specification
+
+The Use Case Diagram defines the operational boundary interactions for the Smart Infrastructure Access Control System across four external actors and six core functional use cases. The Camera Sensor actor initiates visual threat evaluation by interacting with the primary object detection and spatial anomaly diagnosis use cases (`Detect Objects & Patch` and `Diagnose Spatial Anomaly`), which mandatorily include 2D Discrete Cosine Transform spectral extraction (`Extract 2D DCT Spectrum Map`) to construct 4-channel tensors. Upon confirming an adversarial patch anomaly exceeding the tuned confidence threshold (0.70), the ESP32 Controller actor interacts with the hardware actuation use case (`Actuate Gate Lock Relay`) to maintain a de-energized LOW relay state (fail-secure posture), mandatorily including Zero-Trust payload signature verification (`Verify HMAC Signature`) and local alarm signaling (`Emit Alarm LED & Buzzer`). Additionally, the watchdog auto-lock use case (`Enforce Watchdog Auto-Lock`) extends relay actuation if the 15-second host heartbeat is lost. Human actors interact through dedicated security interface use cases: the Security Operator interacts with live dashboard monitoring (`Monitor Live Dashboard`) and manual override controls (`Trigger Gate Override`), which mandatorily include operator JWT bearer token verification (`Authenticate Operator`), while the System Administrator interfaces with system tuning controls (`Tune Detection Threshold`) to modify detection sensitivity parameters at runtime.
+
 ---
 
 ---

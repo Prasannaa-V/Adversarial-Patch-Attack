@@ -17,6 +17,7 @@ Run commands:
 
 import argparse
 import logging
+import os
 import queue
 import signal
 import sys
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import cv2
+import numpy as np
 import requests
 import yaml
 
@@ -112,6 +114,7 @@ class DualModelPipeline:
         self._frame_count = 0
         self._attack_count = 0
         self._t_start = 0.0
+        self._live_frame_path = os.path.join(config.frames_dir, "live_frame.jpg")
 
         # Components
         self._detector: Optional[YOLODetector] = None
@@ -218,6 +221,10 @@ class DualModelPipeline:
                 time.sleep(0.05)
                 continue
 
+            # Pace image folder playback for presentation demos (1s per image)
+            if not self.config.use_webcam and isinstance(self.config.camera_source, str) and self.config.camera_source != "dummy":
+                time.sleep(1.0)
+
             with self._metrics_lock:
                 self._frame_count += 1
                 fps_count += 1
@@ -269,6 +276,42 @@ class DualModelPipeline:
                     self._alert_queue.put_nowait(alert)
                 except queue.Full:
                     logger.warning("Alert queue full — dropping alert")
+
+            # Write annotated live frame snapshot every 5 processed ROIs
+            with self._metrics_lock:
+                fc = self._frame_count
+            if fc % 5 == 0:
+                self._save_live_frame(bundle, max_confidence)
+
+    # ── Live frame writer ─────────────────────────────────────────────────────
+    def _save_live_frame(self, bundle: FrameBundle, max_confidence: float):
+        """Draw bounding boxes + SDNL label on frame and write to live_frame.jpg."""
+        try:
+            os.makedirs(os.path.dirname(self._live_frame_path), exist_ok=True)
+            frame = bundle.rgb_frame.copy()
+            is_attack = max_confidence >= self.config.sdnl_threshold
+            colour = (239, 68, 68) if is_attack else (16, 185, 129)   # red / green
+
+            for bbox in bundle.detections:
+                x1, y1, x2, y2 = int(bbox.x1), int(bbox.y1), int(bbox.x2), int(bbox.y2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+
+            # Overlay banner
+            label = f"ATTACK  {max_confidence*100:.1f}%" if is_attack else "CLEAN"
+            banner_bg = (60, 10, 10) if is_attack else (10, 45, 30)
+            cv2.rectangle(frame, (0, 0), (frame.shape[1], 32), banner_bg, -1)
+            cv2.putText(frame, f"InfraEdge-Shield  |  {label}",
+                        (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2, cv2.LINE_AA)
+
+            # Timestamp watermark
+            ts = datetime.now().strftime("%H:%M:%S")
+            cv2.putText(frame, ts, (frame.shape[1] - 80, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
+
+            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(self._live_frame_path, bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        except Exception as e:
+            logger.debug(f"Live frame write failed: {e}")
 
     # ── Thread 3: Alert Publisher ─────────────────────────────────────────────
     def _post_alert_async(self, backend_url: str, confidence: float, frame_path: str, frame_id: str):

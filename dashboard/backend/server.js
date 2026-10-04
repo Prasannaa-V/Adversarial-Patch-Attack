@@ -51,6 +51,18 @@ app.use('/api/events', eventRouter);
 app.use('/api/gate', gateRouter);
 app.use('/api/stats', statsRouter);
 
+// Live annotated frame snapshot (written by Python pipeline at ~5 FPS)
+const liveFramePath = path.join(projectRoot, 'data/frames/live_frame.jpg');
+app.get('/api/live-frame', (req, res) => {
+  const fs = require('fs');
+  if (!fs.existsSync(liveFramePath)) {
+    return res.status(404).json({ error: 'No live frame available — pipeline not running' });
+  }
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Content-Type', 'image/jpeg');
+  res.sendFile(liveFramePath);
+});
+
 // Fallback index endpoint
 app.get('/', (req, res) => {
   res.json({

@@ -79,8 +79,11 @@ class MQTTClient:
     def connect(self):
         """Connect to broker and start background network loop."""
         logger.info(f"Connecting to MQTT broker at {self.broker_host}:{self.broker_port}")
-        self._client.connect(self.broker_host, self.broker_port, self.keepalive)
-        self._client.loop_start()
+        try:
+            self._client.connect(self.broker_host, self.broker_port, self.keepalive)
+            self._client.loop_start()
+        except Exception as e:
+            logger.warning(f"MQTT broker connection unavailable: {e}. Pipeline operating in standalone HTTP dashboard mode.")
 
     def disconnect(self):
         self._client.loop_stop()

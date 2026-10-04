@@ -1,359 +1,468 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import io from 'socket.io-client';
-import { 
-  ShieldAlert, 
-  Unlock, 
-  Lock, 
-  Activity, 
-  Video, 
-  Clock, 
-  CheckCircle, 
-  AlertTriangle,
-  RefreshCw,
-  Sliders,
-  Database
+import {
+  ShieldAlert, Unlock, Lock, Activity, AlertTriangle,
+  CheckCircle, Zap, Cpu, Database, Radio, Eye,
+  BarChart3, Clock, LogIn, LogOut, User,
 } from 'lucide-react';
 
 const BACKEND_URL = 'http://localhost:3000';
+const TOKEN_KEY   = 'infraedge_jwt';
 
-function App() {
-  const [gateStatus, setGateStatus] = useState('LOCKED');
-  const [esp32Online, setEsp32Online] = useState(false);
-  const [pipelineState, setPipelineState] = useState({
-    fps: 0,
-    sdnl_latency_ms: 0,
-    active: false,
-    lastUpdate: null
-  });
-  
-  const [alerts, setAlerts] = useState([]);
-  const [stats, setStats] = useState({
-    totalAttacks: 0,
-    avgConfidence: 0,
-    pendingAck: 0
-  });
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+const saveToken = (t) => localStorage.setItem(TOKEN_KEY, t);
+const loadToken = ()  => localStorage.getItem(TOKEN_KEY);
+const clearToken = () => localStorage.removeItem(TOKEN_KEY);
+const authHeader = () => {
+  const t = loadToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
 
-  const [selectedAlert, setSelectedAlert] = useState(null);
-  const [ackNotes, setAckNotes] = useState('');
-  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
-  const [loading, setLoading] = useState(false);
+// ── Login Screen ──────────────────────────────────────────────────────────────
+function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState('admin');
+  const [password, setPassword] = useState('');
+  const [error, setError]       = useState('');
+  const [loading, setLoading]   = useState(false);
 
-  const socketRef = useRef(null);
-
-  // Fetch initial data
-  const fetchData = async () => {
+  const submit = async (e) => {
+    e.preventDefault();
+    setLoading(true); setError('');
     try {
-      const resEvents = await fetch(`${BACKEND_URL}/api/events?limit=30`);
-      const eventsData = await resEvents.json();
-      setAlerts(eventsData.rows || []);
-
-      const resStats = await fetch(`${BACKEND_URL}/api/stats`);
-      const statsData = await resStats.json();
-      setStats({
-        totalAttacks: statsData.totalAttacks,
-        avgConfidence: statsData.avgConfidence,
-        pendingAck: statsData.pendingAck
-      });
-    } catch (err) {
-      console.error('Error fetching baseline status:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-
-    // Establish WebSocket Connection
-    const socket = io(BACKEND_URL);
-    socketRef.current = socket;
-
-    socket.on('connect', () => {
-      console.log('Connected to Backend WebSocket');
-    });
-
-    socket.on('esp32_status', (data) => {
-      setEsp32Online(data.online);
-    });
-
-    socket.on('pipeline_heartbeat', (data) => {
-      setPipelineState({
-        fps: data.fps,
-        sdnl_latency_ms: data.sdnl_latency_ms,
-        active: true,
-        lastUpdate: Date.now()
-      });
-    });
-
-    socket.on('gate_status_change', (data) => {
-      setGateStatus(data.status);
-    });
-
-    socket.on('attack_alert', (newAlert) => {
-      setAlerts(prev => [newAlert, ...prev]);
-      // Play a subtle high-frequency alert sound
-      try {
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = audioCtx.createOscillator();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
-        osc.connect(audioCtx.destination);
-        osc.start();
-        osc.stop(audioCtx.currentTime + 0.3);
-      } catch (e) {}
-
-      // Refresh Stats
-      fetchData();
-    });
-
-    socket.on('event_acked', (data) => {
-      setAlerts(prev => 
-        prev.map(item => 
-          item.id === parseInt(data.id) 
-            ? { ...item, operator_ack: 1, notes: data.notes } 
-            : item
-        )
-      );
-      fetchData();
-    });
-
-    // Check pipeline activity timeout (offline if no heartbeat for 10 seconds)
-    const activeCheck = setInterval(() => {
-      setPipelineState(prev => {
-        if (prev.active && prev.lastUpdate && (Date.now() - prev.lastUpdate > 10000)) {
-          return { ...prev, active: false, fps: 0, sdnl_latency_ms: 0 };
-        }
-        return prev;
-      });
-    }, 5000);
-
-    return () => {
-      socket.disconnect();
-      clearInterval(activeCheck);
-    };
-  }, []);
-
-  // Trigger manual gate override
-  const handleGateOverride = async (action) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/gate`, {
+      const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action })
+        body: JSON.stringify({ username, password }),
       });
-      const data = await res.json();
-      if (data.status === 'ok') {
-        setGateStatus(data.gate);
-        setShowOverrideConfirm(false);
-      }
-    } catch (err) {
-      console.error('Failed to trigger manual gate override:', err);
+      const d = await res.json();
+      if (!res.ok) { setError(d.error || 'Login failed'); return; }
+      saveToken(d.token);
+      onLogin(d.user);
+    } catch {
+      setError('Cannot reach backend — is the server running?');
     } finally {
       setLoading(false);
     }
   };
 
-  // Submit acknowledgment
+  return (
+    <div className="login-overlay">
+      <div className="login-card">
+        <div className="login-logo">
+          <div className="logo-icon-wrap" style={{ width: 52, height: 52, borderRadius: 14 }}>
+            <ShieldAlert size={26} color="#818cf8" />
+          </div>
+          <div className="logo-text" style={{ fontSize: 22 }}>InfraEdge-Shield</div>
+          <div className="logo-subtitle" style={{ marginTop: 4 }}>Operator Authentication Required</div>
+        </div>
+
+        <form onSubmit={submit} className="login-form">
+          <div className="login-field">
+            <label className="ack-label">Username</label>
+            <input
+              className="textarea-custom"
+              style={{ minHeight: 'auto', padding: '10px 12px', resize: 'none' }}
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              autoComplete="username"
+              required
+            />
+          </div>
+          <div className="login-field">
+            <label className="ack-label">Password</label>
+            <input
+              className="textarea-custom"
+              style={{ minHeight: 'auto', padding: '10px 12px', resize: 'none' }}
+              type="password"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              autoComplete="current-password"
+              placeholder="password123"
+              required
+            />
+          </div>
+
+          {error && (
+            <div style={{ fontSize: 12, color: 'var(--red-light)', background: 'var(--red-dim)', padding: '9px 12px', borderRadius: 7, border: '1px solid rgba(239,68,68,0.25)' }}>
+              {error}
+            </div>
+          )}
+
+          <button type="submit" className="btn btn-primary" disabled={loading}>
+            <LogIn size={15} />
+            {loading ? 'Authenticating…' : 'Sign In'}
+          </button>
+        </form>
+
+        <p style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginTop: 12 }}>
+          JWT-secured · Zero-trust HMAC-SHA256
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Live Feed ─────────────────────────────────────────────────────────────────
+function LiveFeed({ pipelineActive, fps }) {
+  const [imgSrc, setImgSrc]     = useState(null);
+  const [hasFrame, setHasFrame] = useState(false);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (!pipelineActive) { setHasFrame(false); return; }
+    const poll = () => {
+      const url = `${BACKEND_URL}/api/live-frame?t=${Date.now()}`;
+      fetch(url, { cache: 'no-store' })
+        .then(r => {
+          if (!r.ok) { setHasFrame(false); return null; }
+          return r.blob();
+        })
+        .then(blob => {
+          if (!blob) return;
+          const objectUrl = URL.createObjectURL(blob);
+          setImgSrc(prev => { if (prev) URL.revokeObjectURL(prev); return objectUrl; });
+          setHasFrame(true);
+        })
+        .catch(() => setHasFrame(false));
+    };
+    poll();
+    intervalRef.current = setInterval(poll, 300);   // ~3 FPS polling
+    return () => { clearInterval(intervalRef.current); };
+  }, [pipelineActive]);
+
+  if (!pipelineActive) {
+    return (
+      <div className="video-offline">
+        <AlertTriangle size={40} color="#f59e0b" />
+        <span className="video-offline-text">Camera feed offline — start the pipeline</span>
+      </div>
+    );
+  }
+
+  return hasFrame && imgSrc ? (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <img src={imgSrc} alt="Live annotated feed"
+        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      <div className="video-overlay-banner">LIVE · ANNOTATED · ONNX CPU</div>
+      <div className="video-overlay-fps">{fps.toFixed(1)} FPS</div>
+    </div>
+  ) : (
+    <div className="video-active-body">
+      <div className="video-pulse-ring">
+        <Activity size={34} color="#818cf8" />
+      </div>
+      <span style={{ fontSize: 13, marginTop: 14, color: 'var(--text-secondary)' }}>
+        Pipeline active — awaiting first frame…
+      </span>
+      <div className="video-overlay-banner">LIVE · PC EDGE INFERENCE · ONNX CPU</div>
+    </div>
+  );
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
+function App() {
+  const [user, setUser]           = useState(null);
+  const [gateStatus, setGateStatus] = useState('LOCKED');
+  const [esp32Online, setEsp32Online] = useState(false);
+  const [pipelineState, setPipelineState] = useState({
+    fps: 0, sdnl_latency_ms: 0, active: false, lastUpdate: null,
+  });
+  const [alerts, setAlerts]   = useState([]);
+  const [stats, setStats]     = useState({ totalAttacks: 0, avgConfidence: 0, pendingAck: 0 });
+  const [selectedAlert, setSelectedAlert] = useState(null);
+  const [ackNotes, setAckNotes]           = useState('');
+  const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [latestAlert, setLatestAlert] = useState(null);
+  const socketRef = useRef(null);
+
+  // Check if already logged in on mount
+  useEffect(() => {
+    const token = loadToken();
+    if (token) {
+      // Validate token by pinging a protected endpoint
+      fetch(`${BACKEND_URL}/api/stats`, { headers: authHeader() })
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(() => setUser({ username: 'admin' }))  // token is valid
+        .catch(() => clearToken());                   // token expired
+    }
+  }, []);
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [evRes, stRes] = await Promise.all([
+        fetch(`${BACKEND_URL}/api/events?limit=30`),
+        fetch(`${BACKEND_URL}/api/stats`),
+      ]);
+      const ev = await evRes.json();
+      const st = await stRes.json();
+      setAlerts(ev.rows || []);
+      setStats({ totalAttacks: st.totalAttacks, avgConfidence: st.avgConfidence, pendingAck: st.pendingAck });
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    const socket = io(BACKEND_URL);
+    socketRef.current = socket;
+    socket.on('esp32_status', d => setEsp32Online(d.online));
+    socket.on('pipeline_heartbeat', d =>
+      setPipelineState({ fps: d.fps, sdnl_latency_ms: d.sdnl_latency_ms, active: true, lastUpdate: Date.now() })
+    );
+    socket.on('gate_status_change', d => setGateStatus(d.status));
+    socket.on('attack_alert', newAlert => {
+      setAlerts(prev => [newAlert, ...prev]);
+      setLatestAlert(newAlert);
+      setTimeout(() => setLatestAlert(null), 6000);
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(880, ctx.currentTime);
+        osc.connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.25);
+      } catch {}
+      fetchData();
+    });
+    socket.on('event_acked', d => {
+      setAlerts(prev => prev.map(a => a.id === parseInt(d.id) ? { ...a, operator_ack: 1, notes: d.notes } : a));
+      fetchData();
+    });
+    const checker = setInterval(() => {
+      setPipelineState(prev => {
+        if (prev.active && prev.lastUpdate && Date.now() - prev.lastUpdate > 10000)
+          return { ...prev, active: false, fps: 0, sdnl_latency_ms: 0 };
+        return prev;
+      });
+    }, 5000);
+    return () => { socket.disconnect(); clearInterval(checker); };
+  }, [fetchData]);
+
+  const handleGateOverride = async (action) => {
+    const token = loadToken();
+    if (!token) { alert('You must be logged in to override the gate.'); return; }
+    setLoading(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/gate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ action }),
+      });
+      const d = await res.json();
+      if (res.status === 401 || res.status === 403) {
+        alert('Session expired — please log in again.'); clearToken(); setUser(null); return;
+      }
+      if (d.status === 'ok') { setGateStatus(d.gate); setShowOverrideConfirm(false); }
+    } catch {} finally { setLoading(false); }
+  };
+
   const handleAckSubmit = async (e) => {
     e.preventDefault();
     if (!selectedAlert) return;
-
     try {
       const res = await fetch(`${BACKEND_URL}/api/events/${selectedAlert.id}/ack`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ notes: ackNotes })
+        body: JSON.stringify({ notes: ackNotes }),
       });
-      const data = await res.json();
-      if (data.status === 'ok') {
-        setSelectedAlert(null);
-        setAckNotes('');
-      }
-    } catch (err) {
-      console.error('Failed to submit event acknowledgment:', err);
-    }
+      const d = await res.json();
+      if (d.status === 'ok') { setSelectedAlert(null); setAckNotes(''); }
+    } catch {}
   };
+
+  const unacked  = alerts.filter(a => !a.operator_ack);
+  const isLocked = gateStatus === 'LOCKED';
+
+  if (!user) return <LoginScreen onLogin={setUser} />;
 
   return (
     <>
-      {/* HEADER */}
+      {/* ── HEADER ── */}
       <header className="app-header">
         <div className="logo-section">
-          <ShieldAlert size={28} color="#6366f1" />
-          <h1 className="logo-text">InfraEdge-Shield</h1>
+          <div className="logo-icon-wrap">
+            <ShieldAlert size={20} color="#818cf8" />
+          </div>
+          <div>
+            <div className="logo-text">InfraEdge-Shield</div>
+            <div className="logo-subtitle">CYBER-PHYSICAL ACCESS DEFENSE</div>
+          </div>
         </div>
-        
-        <div className="system-status-badges">
-          <div className={`status-badge ${pipelineState.active ? 'active' : ''}`}>
+
+        <div className="header-right">
+          <div className={`status-pill ${pipelineState.active ? 'online' : ''}`}>
             <span className={`status-dot ${pipelineState.active ? 'green' : 'muted'}`} />
-            Pipeline: {pipelineState.active ? `${pipelineState.fps.toFixed(1)} FPS` : 'Offline'}
+            {pipelineState.active ? `Pipeline · ${pipelineState.fps.toFixed(1)} FPS` : 'Pipeline Offline'}
           </div>
-          <div className={`status-badge ${esp32Online ? 'active' : ''}`}>
+          <div className={`status-pill ${esp32Online ? 'online' : ''}`}>
             <span className={`status-dot ${esp32Online ? 'green' : 'muted'}`} />
-            ESP32: {esp32Online ? 'Connected' : 'Disconnected'}
+            {esp32Online ? 'ESP32 Online' : 'ESP32 Offline'}
           </div>
+          <div className={`status-pill ${isLocked ? 'danger' : 'online'}`}>
+            {isLocked ? <Lock size={12} /> : <Unlock size={12} />}
+            Gate {gateStatus}
+          </div>
+          <div className="status-pill online" style={{ gap: 6 }}>
+            <User size={12} />
+            {user.username}
+          </div>
+          <button
+            className="btn btn-ghost"
+            style={{ width: 'auto', padding: '5px 11px', fontSize: 11 }}
+            onClick={() => { clearToken(); setUser(null); }}
+          >
+            <LogOut size={12} /> Logout
+          </button>
         </div>
       </header>
 
-      {/* DASHBOARD BODY */}
+      {/* ── THREAT BANNER ── */}
+      {latestAlert && (
+        <div className="threat-banner">
+          <span className="threat-banner-dot" />
+          <span className="threat-banner-label">⚠ THREAT DETECTED</span>
+          Adversarial patch identified &nbsp;·&nbsp; Confidence&nbsp;
+          <strong>{(latestAlert.confidence * 100).toFixed(1)}%</strong>
+          &nbsp;·&nbsp; Frame&nbsp;
+          <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{latestAlert.frame_id}</code>
+          &nbsp;·&nbsp; Gate → <strong style={{ color: '#fca5a5' }}>LOCKED</strong>
+        </div>
+      )}
+
+      {/* ── MAIN LAYOUT ── */}
       <div className="main-layout">
-        
-        {/* LEFT MAIN PANE */}
         <div className="content-pane">
-          
-          {/* STATS ROW */}
+
+          {/* STATS */}
           <div className="stats-grid">
-            <div className="glass-card">
-              <div className="stat-item">
+            <div className="stat-card danger">
+              <div className="stat-top">
                 <span className="stat-label">Total Attacks Blocked</span>
-                <span className="stat-value" style={{ color: stats.totalAttacks > 0 ? '#ef4444' : '#fff' }}>
-                  {stats.totalAttacks}
-                </span>
+                <div className="stat-icon red"><AlertTriangle size={14} color="#ef4444" /></div>
               </div>
+              <span className={`stat-value ${stats.totalAttacks > 0 ? 'red' : ''}`}>{stats.totalAttacks}</span>
+              <span className="stat-sub">All-time incident count</span>
             </div>
-            <div className="glass-card">
-              <div className="stat-item">
-                <span className="stat-label">Pending operator Acks</span>
-                <span className="stat-value" style={{ color: stats.pendingAck > 0 ? '#f59e0b' : '#fff' }}>
-                  {stats.pendingAck}
-                </span>
+            <div className="stat-card warning">
+              <div className="stat-top">
+                <span className="stat-label">Pending Acks</span>
+                <div className="stat-icon amber"><Clock size={14} color="#f59e0b" /></div>
               </div>
+              <span className={`stat-value ${stats.pendingAck > 0 ? 'amber' : 'green'}`}>{stats.pendingAck}</span>
+              <span className="stat-sub">Unreviewed incidents</span>
             </div>
-            <div className="glass-card">
-              <div className="stat-item">
-                <span className="stat-label">Avg Attack Confidence</span>
-                <span className="stat-value">
-                  {stats.avgConfidence > 0 ? `${(stats.avgConfidence * 100).toFixed(1)}%` : '0%'}
-                </span>
+            <div className="stat-card">
+              <div className="stat-top">
+                <span className="stat-label">Avg Confidence</span>
+                <div className="stat-icon indigo"><BarChart3 size={14} color="#818cf8" /></div>
               </div>
+              <span className="stat-value">
+                {stats.avgConfidence > 0 ? `${(stats.avgConfidence * 100).toFixed(1)}%` : '—'}
+              </span>
+              <span className="stat-sub">SDNL match score</span>
             </div>
-            <div className="glass-card">
-              <div className="stat-item">
+            <div className={`stat-card ${pipelineState.active ? 'success' : ''}`}>
+              <div className="stat-top">
                 <span className="stat-label">SDNL Latency</span>
-                <span className="stat-value">
-                  {pipelineState.active ? `${pipelineState.sdnl_latency_ms.toFixed(1)} ms` : '--'}
-                </span>
+                <div className="stat-icon cyan"><Cpu size={14} color="#06b6d4" /></div>
               </div>
+              <span className={`stat-value ${pipelineState.active ? 'cyan' : ''}`}>
+                {pipelineState.active ? `${pipelineState.sdnl_latency_ms.toFixed(1)} ms` : '—'}
+              </span>
+              <span className="stat-sub">ONNX CPU · ≤15 ms target</span>
             </div>
           </div>
 
-          {/* MAIN STREAM + ACTUATION GRID */}
+          {/* VIDEO + GATE */}
           <div className="main-grid">
-            
-            {/* Live Camera Feed */}
             <div className="glass-card">
               <div className="card-title">
-                <Video size={18} color="#6366f1" />
+                <Eye size={16} color="#818cf8" />
                 Live Visual Feed
+                <span className="card-title-tag">{pipelineState.active ? '● ACTIVE' : '○ OFFLINE'}</span>
               </div>
               <div className="video-container">
-                {pipelineState.active ? (
-                  /* Simulating stream. In a real system, webcam or RTSP feed is active */
-                  <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#070a13' }}>
-                    <Activity size={48} className="pulse" color="#6366f1" />
-                    <span style={{ fontSize: '14px', marginTop: '12px', color: '#94a3b8' }}>Pipeline streaming on edge host</span>
-                    <div className="video-overlay-banner">
-                      LIVE • {pipelineState.fps.toFixed(1)} FPS • PC CPU INFERENCE
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' }}>
-                    <AlertTriangle size={48} color="#f59e0b" />
-                    <span style={{ color: '#94a3b8', fontSize: '14px' }}>Camera feed offline — pipeline not running</span>
-                  </div>
-                )}
+                <LiveFeed pipelineActive={pipelineState.active} fps={pipelineState.fps} />
               </div>
             </div>
 
-            {/* Actuation Gate Lock */}
             <div className="glass-card gate-control-card">
               <div className="card-title" style={{ width: '100%' }}>
-                <Sliders size={18} color="#6366f1" />
-                Gate Actuator Controls
+                <Radio size={14} color="#818cf8" />
+                Gate Actuator
+                <span className="card-title-tag">ESP32</span>
               </div>
-
-              <div className={`gate-badge-huge ${gateStatus === 'LOCKED' ? 'locked' : 'unlocked'}`}>
-                {gateStatus === 'LOCKED' ? <Lock size={48} /> : <Unlock size={48} />}
+              <div className={`gate-orb ${isLocked ? 'locked' : 'unlocked'}`}>
+                {isLocked ? <Lock size={32} /> : <Unlock size={32} />}
               </div>
-
-              <div style={{ textAlign: 'center', marginBottom: '10px' }}>
-                <h3 style={{ fontSize: '18px', fontWeight: '600' }}>
-                  {gateStatus === 'LOCKED' ? 'GATE LOCKED' : 'GATE UNLOCKED'}
-                </h3>
-                <p style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                  State: {gateStatus} {esp32Online ? ' (ESP32 active)' : ' (ESP32 offline - failsafe active)'}
-                </p>
+              <div className="gate-state-label" style={{ color: isLocked ? 'var(--red-light)' : 'var(--green-light)' }}>
+                GATE {gateStatus}
               </div>
-
+              <div className="gate-state-sub">
+                {esp32Online ? 'Controller active' : 'Offline — fail-secure'}
+              </div>
+              <div className="gate-divider" />
               {showOverrideConfirm ? (
-                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <p style={{ fontSize: '12px', color: '#f59e0b', textAlign: 'center', margin: '4px 0' }}>
-                    Are you sure you want to {gateStatus === 'LOCKED' ? 'unlock' : 'lock'} the security gate?
+                <>
+                  <p style={{ fontSize: 11, color: 'var(--amber)', textAlign: 'center' }}>
+                    Confirm {isLocked ? 'unlock' : 'lock'}?
                   </p>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button 
-                      className={`btn ${gateStatus === 'LOCKED' ? 'btn-success' : 'btn-danger'}`}
-                      onClick={() => handleGateOverride(gateStatus === 'LOCKED' ? 'unlock' : 'lock')}
+                  <div className="confirm-row">
+                    <button
+                      className={`btn ${isLocked ? 'btn-success' : 'btn-danger'}`}
+                      onClick={() => handleGateOverride(isLocked ? 'unlock' : 'lock')}
                       disabled={loading}
                     >
-                      Confirm
+                      {loading ? '…' : 'Confirm'}
                     </button>
-                    <button className="btn" style={{ background: '#1e293b' }} onClick={() => setShowOverrideConfirm(false)}>
-                      Cancel
-                    </button>
+                    <button className="btn btn-ghost" onClick={() => setShowOverrideConfirm(false)}>Cancel</button>
                   </div>
-                </div>
+                </>
               ) : (
-                <button 
-                  className={`btn ${gateStatus === 'LOCKED' ? 'btn-success' : 'btn-danger'}`}
+                <button
+                  className={`btn ${isLocked ? 'btn-success' : 'btn-danger'}`}
                   onClick={() => setShowOverrideConfirm(true)}
                   disabled={!esp32Online}
                 >
-                  {gateStatus === 'LOCKED' ? 'Manual Gate Unlock' : 'Manual Gate Lock'}
+                  {isLocked ? <Unlock size={13} /> : <Lock size={13} />}
+                  {isLocked ? 'Unlock Override' : 'Lock Override'}
                 </button>
               )}
             </div>
-
           </div>
 
-          {/* LOWER THUMBNAIL GALLERY */}
-          <div className="glass-card">
+          {/* GALLERY */}
+          <div className="gallery-card">
             <div className="card-title">
-              <Database size={18} color="#6366f1" />
-              Recent Flagged Incidents
+              <Database size={14} color="#818cf8" />
+              Flagged Incident Gallery
+              <span className="card-title-tag">{alerts.length} EVENTS</span>
             </div>
-            
             <div className="gallery-grid">
-              {alerts.slice(0, 12).map((item) => (
-                <div key={item.id} className="gallery-item" onClick={() => {
-                  setSelectedAlert(item);
-                  setAckNotes(item.notes || '');
-                }}>
+              {alerts.slice(0, 24).map(item => (
+                <div
+                  key={item.id}
+                  className="gallery-item"
+                  onClick={() => { setSelectedAlert(item); setAckNotes(item.notes || ''); }}
+                >
                   {item.frame_path ? (
-                    <img 
-                      src={`${BACKEND_URL}/frames/${item.frame_path.split('data/frames/')[1]}`} 
-                      className="gallery-img" 
-                      alt="Incident cropped" 
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.style.display = 'none';
-                      }}
+                    <img
+                      src={`${BACKEND_URL}/frames/${item.frame_path.split('data/frames/')[1]}`}
+                      className="gallery-img" alt="Incident"
+                      onError={e => { e.target.style.display = 'none'; }}
                     />
                   ) : (
-                    <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#1a1f35' }}>
-                      <AlertTriangle size={24} color="#ef4444" />
-                    </div>
+                    <div className="gallery-no-img"><AlertTriangle size={20} color="#ef4444" /></div>
                   )}
                   <div className="gallery-meta">
-                    <div>Conf: {(item.confidence * 100).toFixed(0)}%</div>
-                    <div style={{ color: item.operator_ack ? '#10b981' : '#ef4444' }}>
-                      {item.operator_ack ? 'Acked' : 'Unacked'}
-                    </div>
+                    <span className="gallery-conf">{(item.confidence * 100).toFixed(0)}%</span>
+                    <span className={`gallery-ack ${item.operator_ack ? 'done' : 'pending'}`} />
                   </div>
                 </div>
               ))}
               {alerts.length === 0 && (
-                <div style={{ gridColumn: '1 / -1', padding: '30px', textAlign: 'center', color: '#64748b' }}>
-                  No attack events logged. System clean.
+                <div className="empty-state">
+                  <CheckCircle size={24} color="var(--green)" style={{ margin: '0 auto 8px' }} />
+                  <div>No attack events logged. System clean.</div>
                 </div>
               )}
             </div>
@@ -361,126 +470,101 @@ function App() {
 
         </div>
 
-        {/* RIGHT SIDEBAR FEED */}
+        {/* ── SIDEBAR ── */}
         <div className="sidebar-pane">
           <div className="sidebar-header">
             <span>Critical Alert Feed</span>
-            <span style={{ fontSize: '11px', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '2px 8px', borderRadius: '100px', fontWeight: '600' }}>
-              {stats.pendingAck} Pending
-            </span>
+            <span className="sidebar-pending-badge">{stats.pendingAck} Pending</span>
           </div>
-
           <div className="alert-feed-list">
-            {alerts.filter(a => !a.operator_ack).map((item) => (
-              <div 
-                key={item.id} 
-                className="alert-item unacked"
-                onClick={() => {
-                  setSelectedAlert(item);
-                  setAckNotes(item.notes || '');
-                }}
-              >
-                <div className="alert-item-header">
-                  <span className="alert-conf">{(item.confidence * 100).toFixed(0)}% Match</span>
-                  <span className="alert-time">
-                    {new Date(item.timestamp).toLocaleTimeString()}
-                  </span>
-                </div>
-                <div className="alert-item-body">
-                  Adversarial patch signature detected. Bounding box ROI extracted.
-                  <div style={{ fontSize: '10px', color: '#64748b', marginTop: '6px', fontFamily: 'monospace' }}>
-                    Frame ID: {item.frame_id}
+            {unacked.length === 0 ? (
+              <div className="alert-all-clear">
+                <CheckCircle size={30} color="var(--green)" />
+                <span>All incidents acknowledged</span>
+              </div>
+            ) : (
+              unacked.map(item => (
+                <div
+                  key={item.id}
+                  className="alert-item unacked"
+                  onClick={() => { setSelectedAlert(item); setAckNotes(item.notes || ''); }}
+                >
+                  <div className="alert-item-header">
+                    <span className="alert-conf-badge">
+                      <Zap size={10} style={{ marginRight: 3, verticalAlign: 'middle' }} />
+                      {(item.confidence * 100).toFixed(1)}%
+                    </span>
+                    <span className="alert-time">{new Date(item.timestamp).toLocaleTimeString()}</span>
                   </div>
+                  <div className="alert-item-body">Adversarial patch signature detected.</div>
+                  <div className="alert-frame-id">ID: {item.frame_id}</div>
                 </div>
-              </div>
-            ))}
-
-            {alerts.filter(a => !a.operator_ack).length === 0 && (
-              <div style={{ padding: '40px 20px', textAlign: 'center', color: '#64748b' }}>
-                <CheckCircle size={32} color="#10b981" style={{ margin: '0 auto 12px' }} />
-                <p style={{ fontSize: '13px' }}>All incident reports acknowledged.</p>
-              </div>
+              ))
             )}
           </div>
         </div>
-
       </div>
 
-      {/* DETAIL AND ACKNOWLEDGEMENT MODAL */}
+      {/* ── INCIDENT MODAL ── */}
       {selectedAlert && (
         <div className="modal-overlay" onClick={() => setSelectedAlert(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 style={{ fontSize: '16px', fontWeight: '600' }}>
-                Incident Details — Incident #{selectedAlert.id}
+              <h2>
+                <AlertTriangle size={15} color="#ef4444" style={{ marginRight: 8, verticalAlign: 'middle' }} />
+                Incident #{selectedAlert.id} — Review & Acknowledge
               </h2>
-              <button 
-                style={{ background: 'none', border: 'none', color: '#94a3b8', fontSize: '20px', cursor: 'pointer' }}
-                onClick={() => setSelectedAlert(null)}
-              >
-                &times;
-              </button>
+              <button className="modal-close" onClick={() => setSelectedAlert(null)}>×</button>
             </div>
-            
             <div className="modal-body">
               <div className="modal-img-container">
                 {selectedAlert.frame_path ? (
-                  <img 
-                    src={`${BACKEND_URL}/frames/${selectedAlert.frame_path.split('data/frames/')[1]}`} 
-                    className="modal-img" 
-                    alt="Captured adversarial patch" 
-                    onError={(e) => {
-                      e.target.src = '';
-                      e.target.alt = "Error loading frame image";
-                    }}
+                  <img
+                    src={`${BACKEND_URL}/frames/${selectedAlert.frame_path.split('data/frames/')[1]}`}
+                    className="modal-img" alt="Adversarial patch"
+                    onError={e => { e.target.alt = 'Frame not available'; }}
                   />
                 ) : (
-                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#080a13' }}>
+                  <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#030609' }}>
                     <AlertTriangle size={36} color="#ef4444" />
-                    <span style={{ fontSize: '12px', color: '#64748b', marginTop: '8px' }}>Frame file not available on local host</span>
+                    <span style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>Frame snapshot not available</span>
                   </div>
                 )}
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px', background: 'rgba(255, 255, 255, 0.01)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                <div>
-                  <span style={{ color: '#64748b' }}>Detected at:</span>
-                  <div style={{ fontWeight: '500', marginTop: '2px' }}>{new Date(selectedAlert.timestamp).toLocaleString()}</div>
+              <div className="modal-meta-grid">
+                <div className="meta-item">
+                  <label>Detected At</label>
+                  <div className="meta-val">{new Date(selectedAlert.timestamp).toLocaleString()}</div>
                 </div>
-                <div>
-                  <span style={{ color: '#64748b' }}>SDNL Match Confidence:</span>
-                  <div style={{ fontWeight: '600', color: '#ef4444', marginTop: '2px' }}>
-                    {(selectedAlert.confidence * 100).toFixed(2)}%
-                  </div>
+                <div className="meta-item">
+                  <label>SDNL Confidence</label>
+                  <div className="meta-val danger">{(selectedAlert.confidence * 100).toFixed(2)}%</div>
                 </div>
-                <div>
-                  <span style={{ color: '#64748b' }}>Frame Identifier:</span>
-                  <div style={{ fontWeight: '500', marginTop: '2px', fontFamily: 'monospace' }}>{selectedAlert.frame_id}</div>
+                <div className="meta-item">
+                  <label>Frame ID</label>
+                  <div className="meta-val mono">{selectedAlert.frame_id}</div>
                 </div>
-                <div>
-                  <span style={{ color: '#64748b' }}>Gate lock state:</span>
-                  <div style={{ fontWeight: '600', color: '#ef4444', marginTop: '2px' }}>🔒 LOCKED</div>
+                <div className="meta-item">
+                  <label>Gate State</label>
+                  <div className="meta-val danger">🔒 LOCKED (Fail-Secure)</div>
                 </div>
               </div>
-
               <form onSubmit={handleAckSubmit} className="ack-form">
-                <span style={{ fontSize: '13px', color: '#94a3b8' }}>Operator Acknowledgment Notes:</span>
+                <span className="ack-label">Operator Acknowledgment Notes</span>
                 <textarea
                   className="textarea-custom"
-                  placeholder="Enter classification notes or incident analysis remarks..."
+                  placeholder="Enter classification notes or incident analysis…"
                   value={ackNotes}
-                  onChange={(e) => setAckNotes(e.target.value)}
-                  disabled={selectedAlert.operator_ack}
+                  onChange={e => setAckNotes(e.target.value)}
+                  disabled={!!selectedAlert.operator_ack}
                 />
-                
                 {!selectedAlert.operator_ack ? (
-                  <button type="submit" className="btn btn-primary" style={{ marginTop: '8px' }}>
-                    Acknowledge Alert
+                  <button type="submit" className="btn btn-primary">
+                    <CheckCircle size={15} /> Acknowledge Alert
                   </button>
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#10b981', background: 'rgba(16, 185, 129, 0.08)', padding: '10px', borderRadius: '8px', fontSize: '13px' }}>
-                    <CheckCircle size={18} />
-                    <span>Incident acknowledged by operator</span>
+                  <div className="ack-done-banner">
+                    <CheckCircle size={18} /> Incident already acknowledged
                   </div>
                 )}
               </form>
