@@ -9,8 +9,8 @@ InfraEdge-Shield dual-model inference pipeline.
 
 Run commands:
   python inference/pipeline.py --dry-run                           # Default dummy/simulation mode
-  python inference/pipeline.py --image data/apde/attack/img_0.jpg  # Static image mode
-  python inference/pipeline.py --image-dir data/apde/attack        # Image folder mode
+  python inference/pipeline.py --image data/crops/attack/<file>.jpg  # Static image mode
+  python inference/pipeline.py --image-dir data/crops/attack        # Image folder mode
   python inference/pipeline.py --video test_video.mp4              # Video file mode
   python inference/pipeline.py --use-webcam                        # Live webcam mode (toggle)
 """
@@ -32,10 +32,16 @@ import numpy as np
 import requests
 import yaml
 
-from detector import FrameBundle, YOLODetector
-from frame_store import FrameStore
-from mqtt_client import MQTTClient
-from sdnl import SDNLClassifier
+try:
+    from detector import FrameBundle, YOLODetector
+    from frame_store import FrameStore
+    from mqtt_client import MQTTClient, generate_payload_signature
+    from sdnl import SDNLClassifier
+except ImportError:
+    from inference.detector import FrameBundle, YOLODetector
+    from inference.frame_store import FrameStore
+    from inference.mqtt_client import MQTTClient, generate_payload_signature
+    from inference.sdnl import SDNLClassifier
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -53,7 +59,7 @@ class PipelineConfig:
     use_webcam: bool = False
     yolo_model: str = "yolov8n.pt"
     sdnl_model: str = "models/sdnl/sdnl_v1.onnx"
-    sdnl_threshold: float = 0.85
+    sdnl_threshold: float = 0.70
     broker_host: str = "localhost"
     broker_port: int = 1883
     backend_url: str = "http://localhost:3000"
@@ -285,20 +291,24 @@ class DualModelPipeline:
 
     # ── Live frame writer ─────────────────────────────────────────────────────
     def _save_live_frame(self, bundle: FrameBundle, max_confidence: float):
-        """Draw bounding boxes + SDNL label on frame and write to live_frame.jpg."""
+        """Draw bounding boxes + SDNL label on frame and write to live_frame.jpg.
+
+        NOTE: bundle.rgb_frame is OpenCV BGR (despite the name). All drawing
+        uses BGR tuples and the frame is written directly with imwrite.
+        """
         try:
             os.makedirs(os.path.dirname(self._live_frame_path), exist_ok=True)
             frame = bundle.rgb_frame.copy()
             is_attack = max_confidence >= self.config.sdnl_threshold
-            colour = (239, 68, 68) if is_attack else (16, 185, 129)   # red / green
+            colour = (68, 68, 239) if is_attack else (129, 185, 16)   # red / green in BGR
 
             for bbox in bundle.detections:
                 x1, y1, x2, y2 = int(bbox.x1), int(bbox.y1), int(bbox.x2), int(bbox.y2)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
 
-            # Overlay banner
+            # Overlay banner (BGR backgrounds)
             label = f"ATTACK  {max_confidence*100:.1f}%" if is_attack else "CLEAN"
-            banner_bg = (60, 10, 10) if is_attack else (10, 45, 30)
+            banner_bg = (10, 10, 60) if is_attack else (30, 45, 10)
             cv2.rectangle(frame, (0, 0), (frame.shape[1], 32), banner_bg, -1)
             cv2.putText(frame, f"InfraEdge-Shield  |  {label}",
                         (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.65, colour, 2, cv2.LINE_AA)
@@ -308,22 +318,23 @@ class DualModelPipeline:
             cv2.putText(frame, ts, (frame.shape[1] - 80, 22),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1, cv2.LINE_AA)
 
-            bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(self._live_frame_path, bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            cv2.imwrite(self._live_frame_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
         except Exception as e:
             logger.debug(f"Live frame write failed: {e}")
 
     # ── Thread 3: Alert Publisher ─────────────────────────────────────────────
     def _post_alert_async(self, backend_url: str, confidence: float, frame_path: str, frame_id: str):
         try:
+            payload = {
+                "confidence": round(float(confidence), 4),
+                "frame_path": frame_path,
+                "frame_id": frame_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            payload["hmac_sig"] = generate_payload_signature(payload)
             requests.post(
                 f"{backend_url}/api/events",
-                json={
-                    "confidence": confidence,
-                    "frame_path": frame_path,
-                    "frame_id": frame_id,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                },
+                json=payload,
                 timeout=2.0,
             )
         except requests.exceptions.RequestException as e:
@@ -392,7 +403,7 @@ def main():
     parser.add_argument("--video", type=str, default=None, help="Path to sample video file")
     parser.add_argument("--dummy", action="store_true", help="Use synthetic simulation generator (default fallback)")
     
-    parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.85)")
+    parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.70 from config)")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")
     parser.add_argument("--dry-run", action="store_true", help="Disable MQTT broker and backend POST (dry-run mode)")
     args = parser.parse_args()

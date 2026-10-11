@@ -258,12 +258,17 @@ function App() {
   const handleAckSubmit = async (e) => {
     e.preventDefault();
     if (!selectedAlert) return;
+    const token = loadToken();
+    if (!token) { alert('You must be logged in to acknowledge.'); return; }
     try {
       const res = await fetch(`${BACKEND_URL}/api/events/${selectedAlert.id}/ack`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
         body: JSON.stringify({ notes: ackNotes }),
       });
+      if (res.status === 401 || res.status === 403) {
+        alert('Session expired — please log in again.'); clearToken(); setUser(null); return;
+      }
       const d = await res.json();
       if (d.status === 'ok') { setSelectedAlert(null); setAckNotes(''); }
     } catch {}

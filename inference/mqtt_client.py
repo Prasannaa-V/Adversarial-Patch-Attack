@@ -22,11 +22,43 @@ logger = logging.getLogger(__name__)
 HMAC_SHARED_SECRET = os.getenv("HMAC_SHARED_SECRET", "smartgate_zero_trust_hmac_secret_2026").encode("utf-8")
 
 
+def _canonical_json(payload_dict: dict) -> str:
+    """Deterministic canonical form shared by Python, JS, and ESP32.
+
+    Sorted keys, compact separators, no spaces.
+    Strings: JSON-quoted. Bool: true/false. Int: decimal.
+    Float: fixed %.4f then trim trailing zeros (0.9400 -> 0.94, 20.0000 -> 20).
+    This avoids Python `0.0` vs JS `0` vs ESP32 `0.0000` mismatches.
+    """
+    parts = []
+    for k in sorted(payload_dict.keys()):
+        if k == "hmac_sig":
+            continue
+        v = payload_dict[k]
+        if isinstance(v, bool):
+            s = "true" if v else "false"
+        elif isinstance(v, int):
+            s = str(v)
+        elif isinstance(v, float):
+            s = f"{v:.4f}"
+            s = s.rstrip("0").rstrip(".")
+            if s in ("", "-"):
+                s = "0"
+            if s == "-0":
+                s = "0"
+        elif isinstance(v, str):
+            s = json.dumps(v)
+        elif v is None:
+            s = "null"
+        else:
+            s = json.dumps(v, separators=(",", ":"))
+        parts.append(f'"{k}":{s}')
+    return "{" + ",".join(parts) + "}"
+
+
 def generate_payload_signature(payload_dict: dict) -> str:
-    """Generates HMAC-SHA256 signature over sorted JSON payload keys."""
-    # Exclude any pre-existing signature field
-    filtered = {k: v for k, v in payload_dict.items() if k != "hmac_sig"}
-    canonical = json.dumps(filtered, sort_keys=True)
+    """Generates HMAC-SHA256 signature over canonical JSON payload."""
+    canonical = _canonical_json(payload_dict)
     return hmac.new(HMAC_SHARED_SECRET, canonical.encode("utf-8"), hashlib.sha256).hexdigest()
 
 

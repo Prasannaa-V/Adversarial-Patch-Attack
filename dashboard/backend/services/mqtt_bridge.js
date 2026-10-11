@@ -10,19 +10,45 @@ const dbService = require('./db');
 
 const HMAC_SHARED_SECRET = process.env.HMAC_SHARED_SECRET || 'smartgate_zero_trust_hmac_secret_2026';
 
-function generatePayloadSignature(payloadObj) {
-  const filtered = {};
-  Object.keys(payloadObj).sort().forEach(k => {
-    if (k !== 'hmac_sig') filtered[k] = payloadObj[k];
+function canonicalJson(payloadObj) {
+  const keys = Object.keys(payloadObj).filter(k => k !== 'hmac_sig').sort();
+  const parts = keys.map(k => {
+    const v = payloadObj[k];
+    let s;
+    if (typeof v === 'string') {
+      s = JSON.stringify(v);
+    } else if (typeof v === 'boolean') {
+      s = v ? 'true' : 'false';
+    } else if (typeof v === 'number') {
+      if (Number.isInteger(v)) {
+        s = String(v);
+      } else {
+        s = v.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+        if (s === '-0' || s === '') s = '0';
+      }
+    } else if (v === null || v === undefined) {
+      s = 'null';
+    } else {
+      s = JSON.stringify(v);
+    }
+    return `"${k}":${s}`;
   });
-  const canonical = JSON.stringify(filtered);
+  return '{' + parts.join(',') + '}';
+}
+
+function generatePayloadSignature(payloadObj) {
+  const canonical = canonicalJson(payloadObj);
   return crypto.createHmac('sha256', HMAC_SHARED_SECRET).update(canonical).digest('hex');
 }
 
 function verifyPayloadSignature(payloadObj) {
   if (!payloadObj || !payloadObj.hmac_sig) return false;
+  const received = String(payloadObj.hmac_sig);
   const expectedSig = generatePayloadSignature(payloadObj);
-  return crypto.timingSafeEqual(Buffer.from(payloadObj.hmac_sig), Buffer.from(expectedSig));
+  const a = Buffer.from(received);
+  const b = Buffer.from(expectedSig);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
 class MQTTBridge {
@@ -85,8 +111,19 @@ class MQTTBridge {
       payload = { raw: payloadStr };
     }
 
-    // Zero-Trust HMAC attestation check on structured JSON messages
-    if (typeof payload === 'object' && payload.hmac_sig) {
+    // Zero-Trust: safety-critical topics REQUIRE a valid HMAC. Unsigned = reject.
+    const HMAC_REQUIRED = new Set([
+      'smartgate/attack_alert',
+      'smartgate/attack_ack',
+      'smartgate/override',
+      'smartgate/heartbeat',
+      'smartgate/status',
+    ]);
+    if (HMAC_REQUIRED.has(topic)) {
+      if (typeof payload !== 'object' || !payload.hmac_sig) {
+        console.warn(`[ZERO-TRUST REJECT] Message on ${topic} missing hmac_sig — dropped`);
+        return;
+      }
       try {
         if (!verifyPayloadSignature(payload)) {
           console.warn(`[ZERO-TRUST REJECT] Message on ${topic} failed HMAC signature verification!`);

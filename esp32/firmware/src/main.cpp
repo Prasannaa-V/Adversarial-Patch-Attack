@@ -22,36 +22,58 @@
 // ── Shared Secret for Zero-Trust HMAC-SHA256 Attestation ──────────────────────
 const char* HMAC_SECRET_KEY = "smartgate_zero_trust_hmac_secret_2026";
 
-bool verifyPayloadHmac(const JsonObject& doc) {
-  if (!doc.containsKey("hmac_sig")) return false;
-  String receivedSig = doc["hmac_sig"].as<String>();
+// ── Canonical JSON + HMAC (must match Python mqtt_client.py / JS mqtt_bridge.js) ──
+// Sorted keys, compact, no spaces. Float: %.4f trimmed (0.9400 -> 0.94, 20.0000 -> 20).
+String escapeJsonString(const String& s) {
+  String out = "\"";
+  for (size_t i = 0; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '"' || c == '\\') out += '\\';
+    out += c;
+  }
+  out += "\"";
+  return out;
+}
 
+String trimFloatStr(String s) {
+  if (s.indexOf('.') < 0) return s;
+  while (s.endsWith("0")) s.remove(s.length() - 1);
+  if (s.endsWith(".")) s.remove(s.length() - 1);
+  if (s == "-0" || s == "") s = "0";
+  return s;
+}
+
+String buildCanonical(const JsonObject& doc) {
   std::vector<String> keys;
   for (JsonPair kv : doc) {
     String k = kv.key().c_str();
-    if (k != "hmac_sig") {
-      keys.push_back(k);
-    }
+    if (k != "hmac_sig") keys.push_back(k);
   }
   std::sort(keys.begin(), keys.end());
-
   String canonical = "{";
   for (size_t i = 0; i < keys.size(); i++) {
     if (i > 0) canonical += ",";
     String k = keys[i];
     canonical += "\"" + k + "\":";
-    if (doc[k].is<JsonString>()) {
-      canonical += "\"" + doc[k].as<String>() + "\"";
+    if (doc[k].is<bool>()) {
+      canonical += doc[k].as<bool>() ? "true" : "false";
+    } else if (doc[k].is<int>() || doc[k].is<long>()) {
+      canonical += doc[k].as<String>();
     } else if (doc[k].is<float>() || doc[k].is<double>()) {
       char fbuf[32];
-      snprintf(fbuf, sizeof(fbuf), "%.4f", doc[k].as<float>());
-      canonical += String(fbuf);
+      snprintf(fbuf, sizeof(fbuf), "%.4f", (double)doc[k].as<float>());
+      canonical += trimFloatStr(String(fbuf));
+    } else if (doc[k].is<JsonString>()) {
+      canonical += escapeJsonString(doc[k].as<String>());
     } else {
       canonical += doc[k].as<String>();
     }
   }
   canonical += "}";
+  return canonical;
+}
 
+String computeHmacHex(const String& canonical) {
   byte hmacResult[32];
   mbedtls_md_context_t ctx;
   mbedtls_md_type_t md_type = MBEDTLS_MD_SHA256;
@@ -61,13 +83,19 @@ bool verifyPayloadHmac(const JsonObject& doc) {
   mbedtls_md_hmac_update(&ctx, (const unsigned char*)canonical.c_str(), canonical.length());
   mbedtls_md_hmac_finish(&ctx, hmacResult);
   mbedtls_md_free(&ctx);
-
   char calculatedSig[65];
   for (int i = 0; i < 32; i++) {
     sprintf(&calculatedSig[i * 2], "%02x", hmacResult[i]);
   }
   calculatedSig[64] = '\0';
+  return String(calculatedSig);
+}
 
+bool verifyPayloadHmac(const JsonObject& doc) {
+  if (!doc.containsKey("hmac_sig")) return false;
+  String receivedSig = doc["hmac_sig"].as<String>();
+  String canonical = buildCanonical(doc);
+  String calculatedSig = computeHmacHex(canonical);
   return receivedSig.equalsIgnoreCase(calculatedSig);
 }
 
@@ -253,8 +281,19 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     publishStatus();
   }
 
-  // ── Heartbeat ─────────────────────────────────────────────────────────────
+  // ── Heartbeat (HMAC-verified; spoofed heartbeats must not reset watchdog) ──
   else if (topicStr == TOPIC_HEARTBEAT) {
+    StaticJsonDocument<256> hbDoc;
+    DeserializationError hbErr = deserializeJson(hbDoc, payloadStr);
+    if (hbErr) {
+      Serial.println("[ERROR] JSON parse failed for heartbeat");
+      return;
+    }
+    JsonObject hbObj = hbDoc.as<JsonObject>();
+    if (!verifyPayloadHmac(hbObj)) {
+      Serial.println("[ZERO-TRUST REJECT] heartbeat failed HMAC-SHA256 signature attestation!");
+      return;
+    }
     lastHeartbeatMs = millis();
     // If gate was auto-locked by watchdog and heartbeat resumes, unlock
     if (currentState == LOCKED && (millis() - lockStartMs > LOCKOUT_MS)) {
@@ -336,21 +375,25 @@ void stopLedFlash() {
 // MQTT Publishing
 // =============================================================================
 void publishACK() {
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<256> doc;
   doc["gate_status"] = "LOCKED";
-  doc["timestamp"]   = millis();
-  char buf[128];
+  doc["timestamp"]   = (long)millis();
+  JsonObject obj = doc.as<JsonObject>();
+  doc["hmac_sig"] = computeHmacHex(buildCanonical(obj));
+  char buf[256];
   serializeJson(doc, buf);
   mqttClient.publish(TOPIC_ACK, buf, false);
-  Serial.println("[MQTT] ACK published: LOCKED");
+  Serial.println("[MQTT] ACK published: LOCKED (HMAC-signed)");
 }
 
 void publishStatus() {
-  StaticJsonDocument<128> doc;
+  StaticJsonDocument<256> doc;
   doc["gate"]     = (currentState == LOCKED) ? "LOCKED" : "UNLOCKED";
-  doc["uptime_s"] = millis() / 1000;
-  doc["state"]    = currentState;
-  char buf[128];
+  doc["uptime_s"] = (long)(millis() / 1000);
+  doc["state"]    = (int)currentState;
+  JsonObject obj = doc.as<JsonObject>();
+  doc["hmac_sig"] = computeHmacHex(buildCanonical(obj));
+  char buf[256];
   serializeJson(doc, buf);
   mqttClient.publish(TOPIC_STATUS, buf, false);
 }

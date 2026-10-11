@@ -9,9 +9,13 @@ tqdm>=4.66.0
 Pillow>=10.4.0
 PyYAML>=6.0.2
 
-# For SDNL training (GPU machine)
-# torch>=2.3.0
-# torchvision>=0.18.0
+# SDNL training & evaluation (required for train_sdnl.py / benchmark_sdnl.py)
+torch>=2.3.0
+torchvision>=0.18.0
+onnx>=1.15.0
+onnxruntime>=1.17.0
+scikit-learn>=1.3.0
+matplotlib>=3.8.0
 
 # TFLite runtime (edge inference)
 # tflite-runtime>=2.14.0   # use this on Raspberry Pi / lightweight

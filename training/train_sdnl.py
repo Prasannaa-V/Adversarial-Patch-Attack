@@ -286,8 +286,8 @@ def train(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SDNL classifier")
     parser.add_argument("--data-dir", type=str, default="data/preprocessed", help="Path to preprocessed dataset")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
-    parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=20, help="Number of epochs")
+    parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--in-channels", type=int, default=4, help="Input channels (3 for RGB, 4 for RGB+DCT)")
     parser.add_argument("--use-focal-loss", action="store_true", help="Use Focal Loss instead of CrossEntropy")

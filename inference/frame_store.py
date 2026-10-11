@@ -21,7 +21,7 @@ class FrameStore:
     Directory: data/frames/YYYY-MM-DD/frame_<id>.jpg
     """
 
-    def __init__(self, frames_dir: str = "data/frames", max_days: int = 90):
+    def __init__(self, frames_dir: str = "data/frames", max_days: int = 7):
         self.frames_dir = frames_dir
         self.max_days = max_days
         os.makedirs(frames_dir, exist_ok=True)
@@ -53,11 +53,13 @@ class FrameStore:
             return ""
         return os.path.abspath(filepath)
 
-    def cleanup_old_frames(self) -> int:
+    def cleanup_old_frames(self, max_days: int = None) -> int:
         """
         Delete frames older than max_days. Returns count of deleted files.
+        Defaults to self.max_days when not specified.
         """
-        cutoff = datetime.now(timezone.utc) - timedelta(days=self.max_days)
+        retain_days = max_days if max_days is not None else self.max_days
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retain_days)
         deleted = 0
         pattern = os.path.join(self.frames_dir, "????-??-??", "*.jpg")
         for path in glob.glob(pattern):

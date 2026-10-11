@@ -84,7 +84,7 @@ class SDNLClassifier:
     Supports ONNX, PyTorch, TFLite, and DCT Energy Heuristic fallback.
     """
 
-    def __init__(self, model_path: str = "models/sdnl/sdnl_v1.onnx", threshold: float = 0.85):
+    def __init__(self, model_path: str = "models/sdnl/sdnl_v1.onnx", threshold: float = 0.70):
         self.threshold = threshold
         self.model_path = model_path
         self._latency_ms = 0.0
@@ -162,6 +162,17 @@ class SDNLClassifier:
             confidence: float in [0, 1]
         """
         t0 = time.perf_counter()
+
+        # Guard: invalid / empty ROI (e.g. degenerate BBox) -> CLEAN, never crash
+        if roi_rgb is None or not isinstance(roi_rgb, np.ndarray) or roi_rgb.size == 0:
+            self._latency_ms = (time.perf_counter() - t0) * 1000.0
+            return "CLEAN", 0.0
+        if roi_rgb.shape[0] < 8 or roi_rgb.shape[1] < 8:
+            self._latency_ms = (time.perf_counter() - t0) * 1000.0
+            return "CLEAN", 0.0
+        if np.count_nonzero(roi_rgb) == 0:
+            self._latency_ms = (time.perf_counter() - t0) * 1000.0
+            return "CLEAN", 0.0
 
         if self._backend == "onnx":
             tensor = build_4ch_tensor(roi_rgb)            # (128, 128, 4)

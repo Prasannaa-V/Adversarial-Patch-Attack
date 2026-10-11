@@ -51,7 +51,11 @@ class BBox:
 
 @dataclass
 class FrameBundle:
-    """Output of one detection cycle."""
+    """Output of one detection cycle.
+
+    NOTE: rgb_frame is OpenCV BGR (despite the name) to avoid extra converts.
+    SDNL build_4ch_tensor() expects BGR; FrameStore.save_frame() expects BGR.
+    """
     rgb_frame: np.ndarray
     detections: List[BBox] = field(default_factory=list)
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
