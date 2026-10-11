@@ -59,9 +59,27 @@ app.get('/api/live-frame', (req, res) => {
   if (!fs.existsSync(liveFramePath)) {
     return res.status(404).json({ error: 'No live frame available — pipeline not running' });
   }
+  try {
+    const stats = fs.statSync(liveFramePath);
+    const ageMs = Date.now() - stats.mtimeMs;
+    if (ageMs > 10000) {
+      return res.status(404).json({ error: 'No live frame available — pipeline stalled' });
+    }
+  } catch {}
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Content-Type', 'image/jpeg');
   res.sendFile(liveFramePath);
+});
+
+// HTTP Heartbeat from Python pipeline (keeps dashboard active without MQTT broker)
+app.post('/api/heartbeat', (req, res) => {
+  const { fps, sdnl_latency_ms } = req.body || {};
+  io.emit('pipeline_heartbeat', {
+    fps: typeof fps === 'number' ? fps : 0,
+    sdnl_latency_ms: typeof sdnl_latency_ms === 'number' ? sdnl_latency_ms : 0,
+    timestamp: new Date().toISOString()
+  });
+  res.json({ ok: true });
 });
 
 // Fallback index endpoint

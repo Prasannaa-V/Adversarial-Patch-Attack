@@ -122,6 +122,8 @@ class DualModelPipeline:
         self._frame_count = 0
         self._attack_count = 0
         self._demo_counter = 0
+        self._last_alert_time = 0.0
+        self.alert_cooldown_s = 4.0  # 4-second incident debouncing / cooldown
         self._t_start = 0.0
         self._live_frame_path = os.path.join(config.frames_dir, "live_frame.jpg")
 
@@ -290,20 +292,21 @@ class DualModelPipeline:
                 max_confidence = max(max_confidence, self.config.demo_confidence)
                 logger.info(f"[DEMO] Forced attack frame #{self._demo_counter} conf={max_confidence:.2f}")
 
+            now = time.time()
             if max_confidence >= self.config.sdnl_threshold:
-                with self._metrics_lock:
-                    self._attack_count += 1
-                alert = AlertPayload(bundle=bundle, confidence=max_confidence)
-                try:
-                    self._alert_queue.put_nowait(alert)
-                except queue.Full:
-                    logger.warning("Alert queue full — dropping alert")
+                # Debounce alerts with a cooldown so 1 continuous presentation = 1 clean incident
+                if (now - self._last_alert_time) >= self.alert_cooldown_s:
+                    self._last_alert_time = now
+                    with self._metrics_lock:
+                        self._attack_count += 1
+                    alert = AlertPayload(bundle=bundle, confidence=max_confidence)
+                    try:
+                        self._alert_queue.put_nowait(alert)
+                    except queue.Full:
+                        logger.warning("Alert queue full — dropping alert")
 
-            # Write annotated live frame snapshot every 5 processed ROIs
-            with self._metrics_lock:
-                fc = self._frame_count
-            if fc % 5 == 0:
-                self._save_live_frame(bundle, max_confidence)
+            # Write annotated live frame snapshot for smooth dashboard streaming
+            self._save_live_frame(bundle, max_confidence)
 
     # ── Live frame writer ─────────────────────────────────────────────────────
     def _save_live_frame(self, bundle: FrameBundle, max_confidence: float):
@@ -397,6 +400,15 @@ class DualModelPipeline:
                 fps=self._fps,
                 sdnl_latency_ms=self._sdnl_latency_ms,
             )
+        # Also post to HTTP backend to keep web dashboard active even without MQTT broker
+        try:
+            requests.post(
+                f"{self.config.backend_url}/api/heartbeat",
+                json={"fps": round(self._fps, 1), "sdnl_latency_ms": round(self._sdnl_latency_ms, 2)},
+                timeout=1.0,
+            )
+        except Exception:
+            pass
 
     def _log_stats(self):
         uptime = time.time() - self._t_start

@@ -65,8 +65,11 @@ class FrameBundle:
         return len(self.detections) == 0
 
 
-# COCO classes relevant for infrastructure security
-RELEVANT_CLASSES = {"person", "car", "motorcycle", "bus", "truck"}
+# COCO classes relevant for infrastructure security & physical attack surfaces
+RELEVANT_CLASSES = {
+    "person", "car", "motorcycle", "bus", "truck",
+    "cell phone", "book", "backpack", "handbag", "laptop", "suitcase"
+}
 
 
 class YOLODetector:
@@ -219,8 +222,8 @@ class YOLODetector:
         if frame.shape[:2] != (self.frame_size[1], self.frame_size[0]):
             frame = cv2.resize(frame, self.frame_size)
 
-        # Run YOLO detection
-        results = self.model(frame, conf=self.conf_threshold, verbose=False)
+        # Run YOLO detection with optimized 416px resolution on CPU
+        results = self.model(frame, imgsz=416, conf=self.conf_threshold, verbose=False)
         detections: List[BBox] = []
 
         for result in results:
@@ -235,10 +238,12 @@ class YOLODetector:
                 detections.append(BBox(x1=x1, y1=y1, x2=x2, y2=y2,
                                        label=label, confidence=conf))
 
-        # If no YOLO bbox found on static image/folder frame, default to full image box for testing patch classifier
-        if len(detections) == 0 and (self._mode in ["image", "folder"]):
+        # If no YOLO bbox found (e.g. patch held close to lens covering frame), evaluate center ROI
+        if len(detections) == 0:
             h, w = frame.shape[:2]
-            detections.append(BBox(x1=10, y1=10, x2=w-10, y2=h-10, label="target_roi", confidence=0.99))
+            detections.append(BBox(x1=int(w * 0.15), y1=int(h * 0.15),
+                                   x2=int(w * 0.85), y2=int(h * 0.85),
+                                   label="camera_field", confidence=0.85))
 
         return FrameBundle(rgb_frame=frame, detections=detections)
 

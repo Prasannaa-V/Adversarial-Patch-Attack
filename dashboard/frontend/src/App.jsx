@@ -110,28 +110,42 @@ function LiveFeed({ pipelineActive, fps }) {
   const intervalRef = useRef(null);
 
   useEffect(() => {
-    if (!pipelineActive) { setHasFrame(false); return; }
-    const poll = () => {
-      const url = `${BACKEND_URL}/api/live-frame?t=${Date.now()}`;
-      fetch(url, { cache: 'no-store' })
-        .then(r => {
-          if (!r.ok) { setHasFrame(false); return null; }
-          return r.blob();
-        })
-        .then(blob => {
-          if (!blob) return;
-          const objectUrl = URL.createObjectURL(blob);
-          setImgSrc(prev => { if (prev) URL.revokeObjectURL(prev); return objectUrl; });
-          setHasFrame(true);
-        })
-        .catch(() => setHasFrame(false));
-    };
-    poll();
-    intervalRef.current = setInterval(poll, 300);   // ~3 FPS polling
-    return () => { clearInterval(intervalRef.current); };
-  }, [pipelineActive]);
+    let active = true;
+    let timerId = null;
 
-  if (!pipelineActive) {
+    const poll = async () => {
+      if (!active) return;
+      try {
+        const url = `${BACKEND_URL}/api/live-frame?t=${Date.now()}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!active) return;
+        if (!res.ok) {
+          setHasFrame(false);
+          timerId = setTimeout(poll, 300);
+          return;
+        }
+        const blob = await res.blob();
+        if (!active) return;
+        const objectUrl = URL.createObjectURL(blob);
+        setImgSrc(prev => { if (prev) URL.revokeObjectURL(prev); return objectUrl; });
+        setHasFrame(true);
+        timerId = setTimeout(poll, 60); // smooth ~15 FPS video playback
+      } catch {
+        if (active) {
+          setHasFrame(false);
+          timerId = setTimeout(poll, 300);
+        }
+      }
+    };
+
+    poll();
+    return () => {
+      active = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, []);
+
+  if (!hasFrame || !imgSrc) {
     return (
       <div className="video-offline">
         <AlertTriangle size={40} color="#f59e0b" />
@@ -141,11 +155,11 @@ function LiveFeed({ pipelineActive, fps }) {
   }
 
   return hasFrame && imgSrc ? (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div style={{ position: 'relative', width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#000' }}>
       <img src={imgSrc} alt="Live annotated feed"
-        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+        style={{ maxWidth: '100%', maxHeight: '100%', width: 'auto', height: 'auto', objectFit: 'contain', display: 'block' }} />
       <div className="video-overlay-banner">LIVE · ANNOTATED · ONNX CPU</div>
-      <div className="video-overlay-fps">{fps.toFixed(1)} FPS</div>
+      <div className="video-overlay-fps">{(fps || 15).toFixed(1)} FPS</div>
     </div>
   ) : (
     <div className="video-active-body">
