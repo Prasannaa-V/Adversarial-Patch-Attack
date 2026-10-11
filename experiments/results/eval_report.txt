@@ -22,7 +22,3 @@ Confusion Matrix:
   TP=128  FP=1
   FN=2  TN=29
 
-Latency (ONNX CPU, N=200):
-  Mean: 1.99 ms
-  P95:  3.71 ms
-  P99:  4.94 ms
