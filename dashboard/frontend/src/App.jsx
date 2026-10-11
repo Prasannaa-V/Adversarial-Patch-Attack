@@ -169,7 +169,7 @@ function App() {
     fps: 0, sdnl_latency_ms: 0, active: false, lastUpdate: null,
   });
   const [alerts, setAlerts]   = useState([]);
-  const [stats, setStats]     = useState({ totalAttacks: 0, avgConfidence: 0, pendingAck: 0 });
+  const [stats, setStats]     = useState({ totalAttacks: 0, avgConfidence: 0, pendingAck: 0, hourlyDistribution: [] });
   const [selectedAlert, setSelectedAlert] = useState(null);
   const [ackNotes, setAckNotes]           = useState('');
   const [showOverrideConfirm, setShowOverrideConfirm] = useState(false);
@@ -198,7 +198,12 @@ function App() {
       const ev = await evRes.json();
       const st = await stRes.json();
       setAlerts(ev.rows || []);
-      setStats({ totalAttacks: st.totalAttacks, avgConfidence: st.avgConfidence, pendingAck: st.pendingAck });
+      setStats({
+        totalAttacks: st.totalAttacks,
+        avgConfidence: st.avgConfidence,
+        pendingAck: st.pendingAck,
+        hourlyDistribution: st.hourlyDistribution || [],
+      });
     } catch {}
   }, []);
 
@@ -433,6 +438,37 @@ function App() {
                 </button>
               )}
             </div>
+          </div>
+
+          {/* ANALYTICS — attacks by hour (today, UTC), no chart lib */}
+          <div className="glass-card" style={{ marginTop: 14 }}>
+            <div className="card-title">
+              <BarChart3 size={14} color="#818cf8" />
+              Attacks by Hour
+              <span className="card-title-tag">TODAY UTC</span>
+            </div>
+            {(() => {
+              const dist = stats.hourlyDistribution || [];
+              if (dist.length === 0) {
+                return <div className="stat-sub" style={{ padding: '4px 2px 8px' }}>No attacks logged today.</div>;
+              }
+              const max = Math.max(...dist.map(d => d.count), 1);
+              return (
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 64, padding: '6px 2px 2px' }}>
+                  {dist.map(d => (
+                    <div key={d.hour} title={`${d.hour}:00 — ${d.count}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                      <div style={{
+                        width: '100%', borderRadius: 3,
+                        height: `${Math.max(4, Math.round((d.count / max) * 48))}px`,
+                        background: 'linear-gradient(180deg,#818cf8,#6366f1)',
+                        opacity: 0.9,
+                      }} />
+                      <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>{String(d.hour).padStart(2, '0')}</span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           {/* GALLERY */}

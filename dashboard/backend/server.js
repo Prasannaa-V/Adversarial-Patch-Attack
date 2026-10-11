@@ -8,6 +8,7 @@ const cors = require('cors');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
+try { require('dotenv').config(); } catch (_) { /* dotenv optional */ }
 
 const authRouter = require('./routes/auth');
 const eventRouter = require('./routes/events');
@@ -69,6 +70,16 @@ app.get('/', (req, res) => {
     status: 'online',
     name: 'Smart Infrastructure Security Gateway API',
     uptime: process.uptime()
+  });
+});
+
+// Health endpoint for demo/smoke checks (no auth; liveness only, no secrets)
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime_s: Math.round(process.uptime()),
+    esp32_online: !!mqttBridge.esp32Online,
+    time: new Date().toISOString(),
   });
 });
 

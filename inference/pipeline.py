@@ -67,6 +67,8 @@ class PipelineConfig:
     heartbeat_interval_s: int = 5
     max_frames: Optional[int] = None
     dry_run: bool = False              # skip MQTT + backend POST
+    demo_attack_every: int = 0         # 0=disabled; N>0 forces conf=0.95 attack every Nth frame (demo)
+    demo_confidence: float = 0.95
 
     @classmethod
     def from_yaml(cls, path: str) -> "PipelineConfig":
@@ -119,6 +121,7 @@ class DualModelPipeline:
         self._sdnl_latency_ms = 0.0
         self._frame_count = 0
         self._attack_count = 0
+        self._demo_counter = 0
         self._t_start = 0.0
         self._live_frame_path = os.path.join(config.frames_dir, "live_frame.jpg")
 
@@ -222,6 +225,11 @@ class DualModelPipeline:
         fps_count = 0
 
         while self._running:
+            # Hard stop: prevents max_frames overshoot from queued frames
+            with self._metrics_lock:
+                if self.config.max_frames and self._frame_count >= self.config.max_frames:
+                    self._running = False
+                    break
             bundle = self._detector.get_frame()
             if bundle is None:
                 time.sleep(0.05)
@@ -273,6 +281,14 @@ class DualModelPipeline:
 
                 if label == "ATTACK" and conf > max_confidence:
                     max_confidence = conf
+
+            with self._metrics_lock:
+                self._demo_counter += 1
+                demo_n = self.config.demo_attack_every
+                demo_hit = demo_n > 0 and (self._demo_counter % demo_n == 0)
+            if demo_hit:
+                max_confidence = max(max_confidence, self.config.demo_confidence)
+                logger.info(f"[DEMO] Forced attack frame #{self._demo_counter} conf={max_confidence:.2f}")
 
             if max_confidence >= self.config.sdnl_threshold:
                 with self._metrics_lock:
@@ -406,6 +422,7 @@ def main():
     parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.70 from config)")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")
     parser.add_argument("--dry-run", action="store_true", help="Disable MQTT broker and backend POST (dry-run mode)")
+    parser.add_argument("--demo-attack-every", type=int, default=0, help="Demo mode: force conf=0.95 attack every Nth frame (e.g. 10)")
     args = parser.parse_args()
 
     # Load config
@@ -434,9 +451,12 @@ def main():
         config.max_frames = args.max_frames
     if args.dry_run:
         config.dry_run = True
+    if args.demo_attack_every:
+        config.demo_attack_every = args.demo_attack_every
 
     logger.info(f"Input Source: '{config.camera_source}' (Webcam Toggle: {config.use_webcam}) | "
-                f"SDNL Threshold: {config.sdnl_threshold} | Dry-run: {config.dry_run}")
+                f"SDNL Threshold: {config.sdnl_threshold} | Dry-run: {config.dry_run} | "
+                f"DemoAttackEvery: {config.demo_attack_every}")
 
     pipeline = DualModelPipeline(config)
     signal.signal(signal.SIGTERM, lambda s, f: pipeline.stop())

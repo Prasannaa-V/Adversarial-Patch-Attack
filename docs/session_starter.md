@@ -21,13 +21,13 @@ gate actuator. No Raspberry Pi, no OAK-D, no depth sensor.
 - **Detector:** YOLOv8n (Ultralytics) via OpenCV — `inference/detector.py`.
 - **SDNL patch classifier:** 4-channel input **RGB + DCT high-frequency energy**
   (NO Laplacian, NO depth) → MobileNetV3-Small (<500K params), ONNX Runtime backend —
-  `inference/sdnl.py`. 128×128 ROI, decision threshold 0.85.
+  `inference/sdnl.py`. 128×128 ROI, decision threshold 0.70 (config default; 0.703 F1-optimal operating point).
 - **Pipeline:** 3 threads (frame reader → SDNL worker → alert publisher) with bounded
   queues — `inference/pipeline.py`. Classifies each ROI independently per frame
   (no temporal tracking yet).
 - **Actuator:** ESP32 relay, fail-secure. Boots LOCKED, 15 s heartbeat watchdog, 30 s
   auto-release, manual override button — `esp32/firmware/src/main.cpp`.
-- **Messaging:** Mosquitto MQTT. Topics `infraedge/{attack_alert, attack_ack, override,
+- **Messaging:** Mosquitto MQTT. Topics `smartgate/{attack_alert, attack_ack, override,
   heartbeat, status}`. QoS1 for safety-critical, QoS0 for heartbeat.
 - **Backend:** Node/Express + Socket.IO + MQTT bridge + SQLite — `dashboard/backend/`.
   Serves frames statically; POST /api/events ingests alerts and emits `attack_alert`.
@@ -35,7 +35,7 @@ gate actuator. No Raspberry Pi, no OAK-D, no depth sensor.
   socket.io-client, lucide-react only (no chart lib / router / axios).
 
 ### Data flow
-camera → YOLOv8n (ROIs) → SDNL (RGB+DCT) → if p ≥ 0.85: MQTT `attack_alert` (QoS1) +
+camera → YOLOv8n (ROIs) → SDNL (RGB+DCT) → if p ≥ 0.70: MQTT `attack_alert` (QoS1) +
 HTTP POST /api/events → ESP32 locks relay + ACK; backend stores event + Socket.IO pushes
 to dashboard. PC sends a heartbeat every 5 s; if it stops, the ESP32 watchdog auto-locks
 within 15 s (fail-secure).
