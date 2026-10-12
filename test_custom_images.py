@@ -19,42 +19,10 @@ import time
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT_DIR, "inference"))
 
-from sdnl import SDNLClassifier
-from detector import RELEVANT_CLASSES  # single source of truth, same as live pipeline
+from sdnl import SDNLClassifier, person_regions
+from detector import YOLODetector  # exact pipeline proposal path (same boxes, same verdict)
 
 THRESHOLD = 0.30   # matches pipeline default
-YOLO_CONF = 0.50   # matches live pipeline (looser values spray low-confidence boxes)
-YOLO_IMGSZ = 416   # matches live pipeline
-
-
-def get_yolo_rois(img, model, conf_cutoff=YOLO_CONF):
-    """Run YOLOv8n and return list of (roi_crop, cls_name, yolo_conf, box)."""
-    h, w = img.shape[:2]
-    results = model(img, imgsz=YOLO_IMGSZ, conf=conf_cutoff, verbose=False)
-    names = model.names
-    rois = []
-    for box in results[0].boxes:
-        cls_id = int(box.cls[0])
-        cls_name = names[cls_id]
-        if cls_name not in RELEVANT_CLASSES:
-            continue
-        yconf = float(box.conf[0])
-        x1, y1, x2, y2 = map(int, box.xyxy[0])
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(w, x2), min(h, y2)
-        if (x2 - x1) < 8 or (y2 - y1) < 8:
-            continue
-        roi = img[y1:y2, x1:x2]
-        rois.append((roi, cls_name, yconf, (x1, y1, x2, y2)))
-
-    # Fallback: if nothing relevant detected, use a center crop
-    if not rois:
-        cx, cy = w // 2, h // 2
-        size = min(w, h) // 3
-        roi = img[max(0, cy-size):cy+size, max(0, cx-size):cx+size]
-        rois.append((roi, "center_fallback", 0.0, (cx-size, cy-size, cx+size, cy+size)))
-
-    return rois
 
 
 def main():
@@ -71,17 +39,8 @@ def main():
     print(f"[*] Loading SDNL ONNX classifier ({model_path})...")
     sdnl = SDNLClassifier(model_path=model_path, threshold=THRESHOLD)
 
-    print(f"[*] Loading YOLOv8n for ROI extraction...")
-    try:
-        from ultralytics import YOLO
-        yolo_model = YOLO("yolov8n.pt")
-        use_yolo = True
-    except Exception as e:
-        print(f"[!] YOLO unavailable ({e}), will run SDNL on full image (less accurate).")
-        yolo_model = None
-        use_yolo = False
-
-    # Gather images
+    print(f"[*] Loading YOLOv8n for ROI extraction (pipeline detector)...")
+    use_yolo = True
     image_paths = []
     for arg in sys.argv[1:]:
         if os.path.isdir(arg):
@@ -115,19 +74,25 @@ def main():
         t0 = time.perf_counter()
 
         if use_yolo:
-            rois = get_yolo_rois(img, yolo_model)
+            # EXACT pipeline path: YOLODetector proposals (letterboxed) +
+            # whole/halves scoring via person_regions. Same boxes, same verdict.
+            from detector import YOLODetector
+            det = YOLODetector(camera_source=p)
+            bundle = det.get_frame()
+            det.release()
 
-            # Run SDNL on each ROI; flag image if ANY roi is ATTACK
             best_conf = 0.0
             best_label = "CLEAN"
             best_cls = ""
-            for roi, cls_name, yconf, box in rois:
-                label, conf = sdnl.infer(roi)
-                if conf > best_conf:
-                    best_conf = conf
-                    best_label = label
-                    best_cls = (f"{cls_name}({yconf:.0%})"
-                                if cls_name != "center_fallback" else "center_crop")
+            for r in bundle.detections:
+                roi = r.to_roi(bundle.rgb_frame)
+                for region in person_regions(roi, r.label):
+                    label, conf = sdnl.infer(region)
+                    if conf > best_conf:
+                        best_conf = conf
+                        best_label = label
+                        best_cls = (f"{r.label}({r.confidence:.0%})"
+                                    if not r.label.startswith("camera_") else "fallback")
         else:
             best_label, best_conf = sdnl.infer(img)
             best_cls = "full_image"

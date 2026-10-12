@@ -8,6 +8,26 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from inference.pipeline import DualModelPipeline
+from inference.sdnl import person_regions
+
+
+class TestPersonRegions(unittest.TestCase):
+    def test_non_person_yields_whole_only(self):
+        roi = np.zeros((128, 128, 3), dtype=np.uint8)
+        out = list(person_regions(roi, "laptop"))
+        self.assertEqual(len(out), 1)
+        self.assertIs(out[0], roi)
+
+    def test_person_yields_whole_plus_halves(self):
+        roi = np.random.default_rng(0).integers(0, 255, (128, 128, 3)).astype(np.uint8)
+        whole, top, bot = list(person_regions(roi, "person"))
+        self.assertEqual(top.shape, (64, 128, 3))
+        self.assertEqual(bot.shape, (64, 128, 3))
+        self.assertTrue(np.array_equal(np.concatenate([top, bot], axis=0), roi))
+
+    def test_tiny_roi_skips_halves(self):
+        roi = np.zeros((8, 8, 3), dtype=np.uint8)
+        self.assertEqual(len(list(person_regions(roi, "person"))), 1)
 
 
 class TestSplitTiles(unittest.TestCase):

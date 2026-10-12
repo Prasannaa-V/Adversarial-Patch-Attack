@@ -253,3 +253,19 @@ class SDNLClassifier:
     def _softmax(logits: np.ndarray) -> np.ndarray:
         e = np.exp(logits - logits.max())
         return e / e.sum()
+
+
+def person_regions(roi_bgr: np.ndarray, label: str):
+    """Yield scored regions for one detection ROI.
+
+    Whole ROI always; plus top/bottom halves for person boxes. Worn/held
+    patches sit on the torso or lap while YOLO person boxes include headroom,
+    so a lap-level patch can be ~10% of the whole box yet ~80% of a half
+    (measured 0.006 full vs 0.897 bottom-half on the same ROI).
+    """
+    yield roi_bgr
+    if label == "person":
+        h = roi_bgr.shape[0]
+        if h >= 16:
+            yield roi_bgr[:h // 2]
+            yield roi_bgr[h // 2:]

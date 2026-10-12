@@ -36,12 +36,12 @@ try:
     from detector import FrameBundle, YOLODetector
     from frame_store import FrameStore
     from mqtt_client import MQTTClient, generate_payload_signature
-    from sdnl import SDNLClassifier
+    from sdnl import SDNLClassifier, person_regions
 except ImportError:
     from inference.detector import FrameBundle, YOLODetector
     from inference.frame_store import FrameStore
     from inference.mqtt_client import MQTTClient, generate_payload_signature
-    from inference.sdnl import SDNLClassifier
+    from inference.sdnl import SDNLClassifier, person_regions
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -334,8 +334,8 @@ class DualModelPipeline:
 
                 for bi, bbox in enumerate(bundle.detections):
                     roi = bbox.to_roi(bundle.rgb_frame)
-                    for ti, tile in enumerate(self.split_tiles(roi, self.config.roi_tiles)):
-                        label, conf = self._sdnl.infer(tile)
+                    for ti, region in enumerate(person_regions(roi, bbox.label)):
+                        label, conf = self._sdnl.infer(region)
                         with self._metrics_lock:
                             self._sdnl_latency_ms = self._sdnl.get_latency_ms()
 
