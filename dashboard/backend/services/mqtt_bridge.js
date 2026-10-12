@@ -73,7 +73,10 @@ class MQTTBridge {
 
   connect() {
     console.log(`[MQTT Bridge] Connecting to broker at ${this.brokerUrl}`);
-    this.client = mqtt.connect(this.brokerUrl);
+    this.client = mqtt.connect(this.brokerUrl, {
+      reconnectPeriod: 10000,
+      connectTimeout: 5000
+    });
 
     this.client.on('connect', () => {
       console.log('[MQTT Bridge] Connected to MQTT broker');
@@ -98,8 +101,13 @@ class MQTTBridge {
       await this.handleMessage(topic, message.toString());
     });
 
+    let lastErrorLog = 0;
     this.client.on('error', (err) => {
-      console.error('[MQTT Bridge] Connection error:', err);
+      const now = Date.now();
+      if (now - lastErrorLog > 30000) {
+        console.warn(`[MQTT Bridge] Broker unavailable at ${this.brokerUrl} (retrying in background)`);
+        lastErrorLog = now;
+      }
     });
   }
 
