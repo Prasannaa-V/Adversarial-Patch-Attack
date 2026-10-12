@@ -30,11 +30,23 @@ cd dashboard/backend && npm start
 cd dashboard/frontend && npm run dev
 ```
 
-## Verified numbers (2026-10-11, purged COCO-clean vs APRICOT-attack, 160 held-out samples)
+## Hard-negative retraining (texture FPs: screens, QR, text, fabric)
+
+```bash
+venv/bin/python training/synth_hard_negatives.py  # 360 synthetic CLEAN tensors → data/preprocessed/clean/synth_*.npy
+venv/bin/python training/train_sdnl.py            # retrain (CrossEntropy, 20 epochs, CPU) → models/sdnl/
+venv/bin/python training/benchmark_sdnl.py --eval-only  # verify recall held + FPR down
+```
+
+The clean set intentionally includes dense text, icon grids, QR-like codes, barcodes,
+moiré screens, halftone print, and checkered/striped fabric — the everyday textures
+that excite the DCT channel. Keep `models/sdnl/` backups before retraining (gitignored).
+
+## Verified numbers (2026-10-12, purged COCO-clean + 360 synthetic texture negatives vs APRICOT-attack, 214 held-out samples)
 
 | Accuracy | Precision | Recall | F1 | Threshold | FPR |
 |---|---|---|---|---|---|
-| 98.12% | 99.22% | 98.46% | 0.9884 | 0.703 (F1-optimal, val) | 3.33% (≤ 5% target) |
+| 99.53% | 100.00% | 99.23% | 0.9961 | 0.30 operating (clean max 0.046, attack p5 0.699) | 0.00% |
 
 SDNL < 500K params, ONNX CPU edge-ready (≤ 15 ms/ROI target). Curves: `experiments/results/`.
 

@@ -21,7 +21,7 @@ gate actuator. No Raspberry Pi, no OAK-D, no depth sensor.
 - **Detector:** YOLOv8n (Ultralytics) via OpenCV — `inference/detector.py`.
 - **SDNL patch classifier:** 4-channel input **RGB + DCT high-frequency energy**
   (NO Laplacian, NO depth) → MobileNetV3-Small (<500K params), ONNX Runtime backend —
-  `inference/sdnl.py`. 128×128 ROI, decision threshold 0.70 (config default; 0.703 F1-optimal operating point).
+  `inference/sdnl.py`. 128×128 ROI, decision threshold 0.30 (config default; clean max 0.046 vs attack p5 0.699).
 - **Pipeline:** 3 threads (frame reader → SDNL worker → alert publisher) with bounded
   queues — `inference/pipeline.py`. Classifies each ROI independently per frame
   (no temporal tracking yet).
@@ -35,7 +35,7 @@ gate actuator. No Raspberry Pi, no OAK-D, no depth sensor.
   socket.io-client, lucide-react only (no chart lib / router / axios).
 
 ### Data flow
-camera → YOLOv8n (ROIs) → SDNL (RGB+DCT) → if p ≥ 0.70: MQTT `attack_alert` (QoS1) +
+camera → YOLOv8n (ROIs) → SDNL (RGB+DCT) → if p ≥ 0.30: MQTT `attack_alert` (QoS1) +
 HTTP POST /api/events → ESP32 locks relay + ACK; backend stores event + Socket.IO pushes
 to dashboard. PC sends a heartbeat every 5 s; if it stops, the ESP32 watchdog auto-locks
 within 15 s (fail-secure).

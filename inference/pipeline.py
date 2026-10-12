@@ -59,7 +59,7 @@ class PipelineConfig:
     use_webcam: bool = False
     yolo_model: str = "yolov8n.pt"
     sdnl_model: str = "models/sdnl/sdnl_v1.onnx"
-    sdnl_threshold: float = 0.70
+    sdnl_threshold: float = 0.30
     broker_host: str = "localhost"
     broker_port: int = 1883
     backend_url: str = "http://localhost:3000"
@@ -450,7 +450,7 @@ def main():
     parser.add_argument("--video", type=str, default=None, help="Path to sample video file")
     parser.add_argument("--dummy", action="store_true", help="Use synthetic simulation generator (default fallback)")
     
-    parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.70 from config)")
+    parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.30 from config)")
     parser.add_argument("--alert-cooldown", type=float, default=None, help="Min seconds between stored alerts (default 15 from config)")
     parser.add_argument("--no-qr-suppress", action="store_true", help="Disable QR structured-code suppression")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")

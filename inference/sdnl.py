@@ -110,7 +110,7 @@ class SDNLClassifier:
     Supports ONNX, PyTorch, TFLite, and DCT Energy Heuristic fallback.
     """
 
-    def __init__(self, model_path: str = "models/sdnl/sdnl_v1.onnx", threshold: float = 0.70,
+    def __init__(self, model_path: str = "models/sdnl/sdnl_v1.onnx", threshold: float = 0.30,
                  qr_suppress: bool = True):
         self.threshold = threshold
         self.qr_suppress = qr_suppress

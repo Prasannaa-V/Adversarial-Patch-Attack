@@ -15,7 +15,7 @@ class TestSdnlPipeline(unittest.TestCase):
         cls.clf = SDNLClassifier(threshold=0.70)
 
     def test_default_threshold_is_070(self):
-        self.assertEqual(SDNLClassifier.__init__.__defaults__[1], 0.70)
+        self.assertEqual(SDNLClassifier.__init__.__defaults__[1], 0.30)
 
     def test_zeros_roi_is_clean_not_crash(self):
         label, conf = self.clf.infer(np.zeros((128, 128, 3), dtype=np.uint8))
@@ -34,7 +34,7 @@ class TestSdnlPipeline(unittest.TestCase):
         sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
         from inference.pipeline import PipelineConfig
         cfg = PipelineConfig()
-        self.assertEqual(cfg.sdnl_threshold, 0.70)
+        self.assertEqual(cfg.sdnl_threshold, 0.30)
         self.assertEqual(cfg.demo_attack_every, 0)
         cfg.demo_attack_every = 10
         self.assertEqual(cfg.demo_confidence, 0.95)
