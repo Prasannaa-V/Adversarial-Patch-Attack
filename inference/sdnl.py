@@ -65,7 +65,14 @@ def qr_code_present(roi_bgr: np.ndarray) -> bool:
 
     QR patterns are dense high-frequency black-and-white grids, so they
     legitimately excite the DCT channel. Suppress them here instead of
-    retraining: a decodable/locatable QR is a structured code, not a patch.
+    retraining.
+
+    DECODABLE-ONLY by design (measured 2026-10-12): the detect() locator
+    fires on 8.9% of real APRICOT attack crops, which would flip up to 8.8%
+    of true ATTACKs to CLEAN. A random swirl essentially never decodes, so
+    requiring a payload cannot hide real attacks; glare-degraded QRs that no
+    longer decode are accepted as residual FPs (contained by threshold +
+    alert cooldown).
     Returns False on any detector failure (fail-open toward SDNL verdict).
     """
     try:
@@ -78,12 +85,9 @@ def qr_code_present(roi_bgr: np.ndarray) -> bool:
             roi_bgr, (256, 256), interpolation=cv2.INTER_LINEAR)
         detector = cv2.QRCodeDetector()
         data, _, _ = detector.detectAndDecode(probe)
-        if data:
-            return True
-        # Fallback: locatable-but-undecodable QR (glare/angle/partial, e.g. iPad
-        # screens) is still a structured code, not a patch.
-        ok, _ = detector.detect(probe)
-        return bool(ok)
+        # Decodable payload required: detect() alone fires on ~9% of real
+        # attack crops and would flip them to CLEAN (measured 8.82%).
+        return bool(data and len(data.strip()) > 0)
     except Exception:
         return False
 

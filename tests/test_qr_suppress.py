@@ -45,6 +45,16 @@ class TestQrSuppress(unittest.TestCase):
             label, _ = clf.infer(roi)
         self.assertEqual(label, "CLEAN")
 
+    def test_no_real_attack_decodes_as_qr(self):
+        # Decodable-only suppression must never hide a true attack: random
+        # swirls essentially never decode. Sampled for speed.
+        import glob
+        import cv2
+        files = sorted(glob.glob("data/crops/attack/*.jpg"))[::15]
+        self.assertGreater(len(files), 10)
+        for p in files:
+            self.assertFalse(qr_code_present(cv2.imread(p)), msg=p)
+
 
 if __name__ == "__main__":
     unittest.main()

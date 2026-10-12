@@ -51,8 +51,9 @@ def main():
     alpha = cv2.GaussianBlur(alpha, (0, 0), r / 2.0)[..., None]
     cx = min(max(cx, side // 2), w - side // 2)
     cy = min(max(cy, side // 2), h - side // 2)
-    x0, y0 = cx - side // 2, cy - side // 2
-    region = photo[y0:y0 + side, x0:x0 + side].astype(np.float32)
+    x0 = min(max(cx - side // 2, 0), w - side)
+    y0 = min(max(cy - side // 2, 0), h - side)
+    region = photo[y0:y0 + side, x0:x0 + side]  # exactly side×side by construction
     photo[y0:y0 + side, x0:x0 + side] = (
         patch.astype(np.float32) * alpha + region * (1.0 - alpha)).astype(np.uint8)
     out = photo
