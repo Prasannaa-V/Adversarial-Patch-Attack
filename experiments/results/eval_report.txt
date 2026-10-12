@@ -2,23 +2,23 @@ InfraEdge-Shield SDNL — Held-Out Test Set Evaluation Report
 ============================================================
 
 Dataset:         data/preprocessed
-Total samples:   1433
+Total samples:   2033
 Train / Val / Test split: 70% / 15% / 15%
-Test set size:   214
-  Attack:        130
+Test set size:   304
+  Attack:        220
   Clean:         84
 
-Threshold:       0.3 (F1-optimised on validation set)
+Threshold:       0.3 (fixed via --threshold (operating point))
 
-Accuracy:        99.53%
-Precision:       100.00%
-Recall:          99.23%
-F1-Score:        0.9961
-False Pos Rate:  0.00%
-AUC-PR:          0.9231
-AUC-ROC:         1.0000
+Accuracy:        74.34%
+Precision:       100.00%  (95% CI 97.4-100.0%)
+Recall:          64.55%  (95% CI 58.0-70.6%)
+F1-Score:        0.7845
+False Pos Rate:  0.00%  (95% CI 0.0-4.4%)
+AUC-PR:          0.9181
+AUC-ROC:         0.9082
 
 Confusion Matrix:
-  TP=129  FP=0
-  FN=1  TN=84
+  TP=142  FP=0
+  FN=78  TN=84
 

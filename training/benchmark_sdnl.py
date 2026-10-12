@@ -154,6 +154,18 @@ def find_optimal_threshold(y_true, y_prob, beta=1.0):
     return round(float(best_t), 3), round(best_f, 4)
 
 
+def wilson_ci(k, n, z=1.96):
+    """Wilson 95% score interval for a binomial rate k/n (honest small-n bounds)."""
+    import math
+    if n == 0:
+        return (0.0, 0.0)
+    p = k / n
+    d = 1 + z * z / n
+    c = p + z * z / (2 * n)
+    m = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return (max(0.0, (c - m) / d), min(1.0, (c + m) / d))
+
+
 # ── Plotting ───────────────────────────────────────────────────────────────────
 def plot_confusion_matrix(tp, fp, fn, tn, threshold, out_path):
     try:
@@ -371,9 +383,11 @@ def main():
         val_probs, _ = run_onnx_inference(args.onnx_path, X_val)
         if args.threshold is not None:
             threshold = args.threshold
+            thresh_note = "fixed via --threshold (operating point)"
             print(f"[Eval] Using fixed threshold: {threshold}")
         else:
             threshold, best_f1 = find_optimal_threshold(y_val, val_probs)
+            thresh_note = "F1-optimised on validation set"
             print(f"[Eval] Optimal threshold (F1-maximising, val set): {threshold}  (F1={best_f1:.4f})")
 
         # ── Run ONNX inference on HELD-OUT TEST SET ──
@@ -383,10 +397,10 @@ def main():
 
         print(f"\n  Threshold:  {threshold}")
         print(f"  Accuracy:   {m['accuracy']*100:.2f}%")
-        print(f"  Precision:  {m['precision']*100:.2f}%")
-        print(f"  Recall:     {m['recall']*100:.2f}%")
+        print(f"  Precision:  {m['precision']*100:.2f}%  (95% CI {wilson_ci(m['tp'], m['tp']+m['fp'])[0]*100:.1f}-{wilson_ci(m['tp'], m['tp']+m['fp'])[1]*100:.1f}%)")
+        print(f"  Recall:     {m['recall']*100:.2f}%  (95% CI {wilson_ci(m['tp'], m['tp']+m['fn'])[0]*100:.1f}-{wilson_ci(m['tp'], m['tp']+m['fn'])[1]*100:.1f}%)")
         print(f"  F1-Score:   {m['f1']:.4f}")
-        print(f"  FPR:        {m['fpr']*100:.2f}%")
+        print(f"  FPR:        {m['fpr']*100:.2f}%  (95% CI {wilson_ci(m['fp'], m['fp']+m['tn'])[0]*100:.1f}-{wilson_ci(m['fp'], m['fp']+m['tn'])[1]*100:.1f}%)")
         print(f"  TP={m['tp']}  FP={m['fp']}  FN={m['fn']}  TN={m['tn']}")
 
         # ── Plots ──
@@ -410,12 +424,15 @@ def main():
             f.write(f"Test set size:   {len(y_test)}\n")
             f.write(f"  Attack:        {y_test.sum()}\n")
             f.write(f"  Clean:         {(y_test==0).sum()}\n\n")
-            f.write(f"Threshold:       {threshold} (F1-optimised on validation set)\n\n")
+            f.write(f"Threshold:       {threshold} ({thresh_note})\n\n")
             f.write(f"Accuracy:        {m['accuracy']*100:.2f}%\n")
-            f.write(f"Precision:       {m['precision']*100:.2f}%\n")
-            f.write(f"Recall:          {m['recall']*100:.2f}%\n")
+            plo, phi = wilson_ci(m['tp'], m['tp'] + m['fp'])
+            rlo, rhi = wilson_ci(m['tp'], m['tp'] + m['fn'])
+            flo, fhi = wilson_ci(m['fp'], m['fp'] + m['tn'])
+            f.write(f"Precision:       {m['precision']*100:.2f}%  (95% CI {plo*100:.1f}-{phi*100:.1f}%)\n")
+            f.write(f"Recall:          {m['recall']*100:.2f}%  (95% CI {rlo*100:.1f}-{rhi*100:.1f}%)\n")
             f.write(f"F1-Score:        {m['f1']:.4f}\n")
-            f.write(f"False Pos Rate:  {m['fpr']*100:.2f}%\n")
+            f.write(f"False Pos Rate:  {m['fpr']*100:.2f}%  (95% CI {flo*100:.1f}-{fhi*100:.1f}%)\n")
             if auc_pr is not None:
                 f.write(f"AUC-PR:          {auc_pr:.4f}\n")
             if auc_roc is not None:
