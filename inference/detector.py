@@ -72,6 +72,18 @@ RELEVANT_CLASSES = {
 }
 
 
+def letterbox(frame: np.ndarray, size: tuple) -> np.ndarray:
+    """Resize preserving aspect ratio, pad with neutral gray (YOLO-style)."""
+    tw, th = size
+    h, w = frame.shape[:2]
+    s = min(tw / w, th / h)
+    nw, nh = int(w * s), int(h * s)
+    resized = cv2.resize(frame, (nw, nh), interpolation=cv2.INTER_LINEAR)
+    out = np.full((th, tw, 3), 114, dtype=np.uint8)
+    out[(th - nh) // 2:(th - nh) // 2 + nh, (tw - nw) // 2:(tw - nw) // 2 + nw] = resized
+    return out
+
+
 class YOLODetector:
     """
     Runs YOLOv8n on frames from live webcam, static image, folder of images, video file, or synthetic frames.
@@ -224,9 +236,12 @@ class YOLODetector:
         if frame is None:
             return None
 
-        # Resize frame if needed for uniformity
+        # Letterbox to frame_size (pad, don't stretch): portrait/phone frames
+        # squished to square distort texture frequencies and collapse SDNL
+        # scores (measured 0.85 -> 0.10 on the same patch). YOLO letterboxes
+        # internally anyway, so detection is unaffected.
         if frame.shape[:2] != (self.frame_size[1], self.frame_size[0]):
-            frame = cv2.resize(frame, self.frame_size)
+            frame = letterbox(frame, self.frame_size)
 
         # Frame skipping: reuse last boxes on skipped frames so the live view
         # stays smooth while YOLO runs at 1/detect_every rate (default every frame).
