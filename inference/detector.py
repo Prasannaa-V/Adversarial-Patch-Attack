@@ -254,11 +254,13 @@ class YOLODetector:
         # If no YOLO bbox found, evaluate candidate ROI
         if len(detections) == 0:
             h, w = frame.shape[:2]
-            if self._mode in ["image", "folder"]:
-                # For standalone test image crops, evaluate the whole image
+            if self._mode in ["image", "folder"] and min(h, w) <= 256:
+                # Standalone test crops ARE the ROI: evaluate the whole image
                 detections.append(BBox(x1=0, y1=0, x2=w, y2=h,
                                        label="test_image", confidence=0.99))
             else:
+                # Full photos / live frames: center fallback (a blinding patch
+                # usually sits centered; whole-frame scoring dilutes it away)
                 detections.append(BBox(x1=int(w * 0.15), y1=int(h * 0.15),
                                        x2=int(w * 0.85), y2=int(h * 0.85),
                                        label="camera_field", confidence=0.85))
