@@ -1,0 +1,93 @@
+InfraEdge-Shield SDNL — APDE cross-dataset evaluation
+================================================================
+weights: frozen v2 (models/sdnl/sdnl_v1.onnx, UNCHANGED) | threshold: 0.3 FIXED (no tuning)
+rows: 500 (test split, stride 74) | runtime: 55s
+
+attack goals present: ['appearing', 'hiding']
+[hiding] classifier recall: 14/472 = 2.97% (95% CI 1.77-4.92)
+[hiding] end-to-end recall (YOLO+SDNL): 5/472 = 1.06% (95% CI 0.45-2.46)
+[hiding] miss split: proposal-stage (no matched person box) 114 | classifier-stage 353
+[appearing] classifier recall: 2/28 = 7.14% (95% CI 1.98-22.65)
+[appearing] images where YOLO still found a person: 17/28
+
+--- by patch type (worst first) ---
+  AdvTshirt/yolov2: 0/13 = 0.00% (95% CI 0.00-22.81)
+  DM-NAP/centernet: 0/14 = 0.00% (95% CI 0.00-21.53)
+  DM-NAP/ssd: 0/13 = 0.00% (95% CI 0.00-22.81)
+  DM-NAP/yolov4: 0/14 = 0.00% (95% CI 0.00-21.53)
+  DM-NAP/yolov5: 0/13 = 0.00% (95% CI 0.00-22.81)
+  GNAP/ddetr: 0/14 = 0.00% (95% CI 0.00-21.53)
+  GNAP/ssd: 0/14 = 0.00% (95% CI 0.00-21.53)
+  TCA/ddetr: 0/14 = 0.00% (95% CI 0.00-21.53)
+  TCEGA/centernet: 0/14 = 0.00% (95% CI 0.00-21.53)
+  TCEGA/retinanet: 0/14 = 0.00% (95% CI 0.00-21.53)
+  advpatch/ddetr: 0/13 = 0.00% (95% CI 0.00-22.81)
+  advpatch/mask_rcnn: 0/14 = 0.00% (95% CI 0.00-21.53)
+  advpatch/yolov2: 0/13 = 0.00% (95% CI 0.00-22.81)
+  advpatch/yolov3: 0/14 = 0.00% (95% CI 0.00-21.53)
+  tsea-mim/ddetr: 0/13 = 0.00% (95% CI 0.00-22.81)
+  tsea-mim/mask_rcnn: 0/14 = 0.00% (95% CI 0.00-21.53)
+  tsea-pgd/centernet: 0/13 = 0.00% (95% CI 0.00-22.81)
+  tsea-pgd/yolov7: 0/13 = 0.00% (95% CI 0.00-22.81)
+  tsea/centernet: 0/14 = 0.00% (95% CI 0.00-21.53)
+  tsea/retinanet: 0/13 = 0.00% (95% CI 0.00-22.81)
+  tsea/yolov2: 0/14 = 0.00% (95% CI 0.00-21.53)
+  tsea/yolov5: 0/13 = 0.00% (95% CI 0.00-22.81)
+  AA/yolov2: 1/14 = 7.14% (95% CI 1.27-31.47)
+  AdvSticker/yolov3: 1/14 = 7.14% (95% CI 1.27-31.47)
+  TCA/ssd: 1/14 = 7.14% (95% CI 1.27-31.47)
+  UPC/yolov3: 1/14 = 7.14% (95% CI 1.27-31.47)
+  tsea-mim/yolov5: 1/14 = 7.14% (95% CI 1.27-31.47)
+  tsea-pgd/yolov5: 1/14 = 7.14% (95% CI 1.27-31.47)
+  AdvCloak/yolov3: 1/13 = 7.69% (95% CI 1.37-33.31)
+  GNAP/faster_rcnn: 1/13 = 7.69% (95% CI 1.37-33.31)
+  GNAP/yolov7: 1/13 = 7.69% (95% CI 1.37-33.31)
+  TCA/faster_rcnn: 1/13 = 7.69% (95% CI 1.37-33.31)
+  TCA/yolov4: 1/13 = 7.69% (95% CI 1.37-33.31)
+  TCEGA/ddetr: 1/13 = 7.69% (95% CI 1.37-33.31)
+  TCEGA/yolov7: 1/13 = 7.69% (95% CI 1.37-33.31)
+  tsea-mim/yolov4: 1/13 = 7.69% (95% CI 1.37-33.31)
+  AdvCloak/yolov2: 2/14 = 14.29% (95% CI 4.01-39.94)
+
+--- by attack method (worst first) ---
+  AdvTshirt: 0/13 = 0.00% (95% CI 0.00-22.81)
+  DM-NAP: 0/54 = 0.00% (95% CI 0.00-6.64)
+  advpatch: 0/54 = 0.00% (95% CI 0.00-6.64)
+  tsea: 0/54 = 0.00% (95% CI 0.00-6.64)
+  tsea-pgd: 1/40 = 2.50% (95% CI 0.44-12.88)
+  GNAP: 2/54 = 3.70% (95% CI 1.02-12.54)
+  TCEGA: 2/54 = 3.70% (95% CI 1.02-12.54)
+  tsea-mim: 2/54 = 3.70% (95% CI 1.02-12.54)
+  TCA: 3/54 = 5.56% (95% CI 1.91-15.11)
+  AA: 1/14 = 7.14% (95% CI 1.27-31.47)
+  AdvSticker: 1/14 = 7.14% (95% CI 1.27-31.47)
+  UPC: 1/14 = 7.14% (95% CI 1.27-31.47)
+  AdvCloak: 3/27 = 11.11% (95% CI 3.85-28.06)
+
+--- by victim detector (worst first) ---
+  centernet: 0/55 = 0.00% (95% CI 0.00-6.53)
+  mask_rcnn: 0/28 = 0.00% (95% CI 0.00-12.06)
+  retinanet: 0/27 = 0.00% (95% CI 0.00-12.46)
+  ddetr: 1/67 = 1.49% (95% CI 0.26-7.98)
+  ssd: 1/41 = 2.44% (95% CI 0.43-12.60)
+  yolov5: 2/54 = 3.70% (95% CI 1.02-12.54)
+  yolov2: 3/68 = 4.41% (95% CI 1.51-12.19)
+  yolov4: 2/40 = 5.00% (95% CI 1.38-16.50)
+  yolov7: 2/39 = 5.13% (95% CI 1.42-16.89)
+  yolov3: 3/55 = 5.45% (95% CI 1.87-14.85)
+  faster_rcnn: 2/26 = 7.69% (95% CI 2.14-24.14)
+
+--- by patch area fraction of image ---
+  <1%: 0/175 = 0.00% (95% CI 0.00-2.15)
+  1-4%: 5/236 = 2.12% (95% CI 0.91-4.86)
+  >4%: 11/89 = 12.36% (95% CI 7.04-20.79)
+
+--- overlap audit (APDE test sources vs our pools) ---
+our COCO val IDs in training pool: 100 | APDE-test COCO sources: 451
+overlapping COCO image IDs: 2 [2431, 6614]
+note: overlap means a familiar BACKGROUND only — no APDE patch type was ever trained on; recall impact, if any, is reported as-is, not corrected.
+INRIA: our ext_inria mirror split is unknown, so INRIA-photo overlap cannot be excluded; APRICOT/synth pools cannot overlap APDE (INRIA+COCO sources only).
+[clean-positive] clean FPR: 54/1000 = 5.40% (95% CI 4.16-6.98)
+[clean-negative] clean FPR: 36/1000 = 3.60% (95% CI 2.61-4.94)
+
+caveats: hiding patches here are SMALL (20% of person long side); expect dilution-driven low recall vs our tight-crop training. Clean sources are shared across APDE train/test patch groups (not source-disjoint) per the dataset card.

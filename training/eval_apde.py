@@ -22,6 +22,7 @@ import csv
 import glob
 import math
 import os
+import re
 import sys
 import time
 
@@ -87,20 +88,27 @@ class Scorer:
 
 
 def our_coco_ids():
+    # COCO_VAL_SAMPLE_URLS builds urls as .../000000{i:06d}.jpg for i in [...]
     ids = set()
     src = os.path.join("training", "download_real_clean_coco.py")
     try:
         txt = open(src).read()
-        import re
-        for m in re.finditer(r"000000(\d+)\.jpg", txt):
-            ids.add(int(m.group(1)))
-        for m in re.finditer(r"\b(\d{6})\b", txt):
-            v = int(m.group(1))
-            if 100 <= v <= 600000:
-                ids.add(v)
+        m = re.search(r"for i in \[(.*?)\]", txt, re.S)
+        if m:
+            for tok in m.group(1).split(","):
+                tok = tok.strip()
+                if tok.isdigit():
+                    ids.add(int(tok))
     except OSError:
         pass
     return ids
+
+
+def apde_coco_id(source, source_id):
+    if not source.startswith("COCO"):
+        return None
+    m = re.search(r"(\d+)$", source_id or "")
+    return int(m.group(1)) if m else None
 
 
 def main():
@@ -169,8 +177,9 @@ def main():
     our_ids = our_coco_ids()
     apde_coco_ids = set()
     for r in rows:
-        if r["source"] == "coco" and r["source_id"].isdigit():
-            apde_coco_ids.add(int(r["source_id"]))
+        cid = apde_coco_id(r["source"], r["source_id"])
+        if cid is not None:
+            apde_coco_ids.add(cid)
     overlap = sorted(our_ids & apde_coco_ids)
 
     os.makedirs(os.path.dirname(args.report) or ".", exist_ok=True)
