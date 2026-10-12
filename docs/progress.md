@@ -33,6 +33,7 @@ Legend: `[x]` done · `[ ]` todo · `[~]` partial · `[!]` blocked / needs exter
 | Test F1-Score | 0.9961 | Verified @ 0.30 operating threshold |
 | Test AUC-PR / AUC-ROC | see `pr_curve.png` / `roc_curve.png` | Regenerated 2026-10-12 |
 | False Positive Rate (FPR) | 0.00% | Verified @ 0.30 threshold (target ≤ 5%) |
+| External FPR: 300 unseen INRIA pedestrian photos (2005 camera, never trained on) | 1.33% @ 0.30 | 4/300; top hit = window-grid facade (0.554). Grid textures are the residual risk |
 | Hard-texture FPR (360 synth: text/icons/QR/barcode/moiré/halftone/fabric) | 0.0% @ 0.30 | Was ~58% before hard-negative retraining |
 | Real ROI ONNX Latency | ≤ 15 ms target | PASS (edge-ready per-run stats in eval log) |
 | SDNL Parameters | < 500K | MobileNetV3-Small (4-channel) |

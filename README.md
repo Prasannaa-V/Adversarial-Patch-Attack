@@ -48,6 +48,9 @@ that excite the DCT channel. Keep `models/sdnl/` backups before retraining (giti
 |---|---|---|---|---|---|
 | 99.53% | 100.00% | 99.23% | 0.9961 | 0.30 operating (clean max 0.046, attack p5 0.699) | 0.00% |
 
+External check: 300 unseen INRIA pedestrian photos → **1.33% FPR** @ 0.30 (top hit: window-grid facade).
+`venv/bin/python training/fetch_inria_clean.py` reproduces the set (kept outside the training pool).
+
 SDNL < 500K params, ONNX CPU edge-ready (≤ 15 ms/ROI target). Curves: `experiments/results/`.
 
 ## Security model
