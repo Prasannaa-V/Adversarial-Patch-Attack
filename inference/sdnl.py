@@ -60,6 +60,32 @@ def build_4ch_tensor(roi_bgr: np.ndarray) -> np.ndarray:
     return tensor.astype(np.float32)
 
 
+def qr_code_present(roi_bgr: np.ndarray) -> bool:
+    """Detect structured QR codes (badges, posters, gate passes).
+
+    QR patterns are dense high-frequency black-and-white grids, so they
+    legitimately excite the DCT channel. Suppress them here instead of
+    retraining: a decodable/locatable QR is a structured code, not a patch.
+    Returns False on any detector failure (fail-open toward SDNL verdict).
+    """
+    try:
+        if roi_bgr is None or not isinstance(roi_bgr, np.ndarray) or roi_bgr.size == 0:
+            return False
+        h, w = roi_bgr.shape[:2]
+        if h < 32 or w < 32:
+            return False
+        probe = roi_bgr if max(h, w) <= 256 else cv2.resize(
+            roi_bgr, (256, 256), interpolation=cv2.INTER_LINEAR)
+        detector = cv2.QRCodeDetector()
+        data, _, _ = detector.detectAndDecode(probe)
+        if data:
+            return True
+        ok, _ = detector.detect(probe)
+        return bool(ok)
+    except Exception:
+        return False
+
+
 def dct_energy_score(roi_rgb: np.ndarray) -> float:
     """
     Lightweight heuristic: normalized DCT high-frequency energy.
@@ -84,8 +110,10 @@ class SDNLClassifier:
     Supports ONNX, PyTorch, TFLite, and DCT Energy Heuristic fallback.
     """
 
-    def __init__(self, model_path: str = "models/sdnl/sdnl_v1.onnx", threshold: float = 0.70):
+    def __init__(self, model_path: str = "models/sdnl/sdnl_v1.onnx", threshold: float = 0.70,
+                 qr_suppress: bool = True):
         self.threshold = threshold
+        self.qr_suppress = qr_suppress
         self.model_path = model_path
         self._latency_ms = 0.0
         self._backend = "heuristic"
@@ -206,8 +234,15 @@ class SDNLClassifier:
             attack_conf = dct_energy_score(roi_rgb)
 
         self._latency_ms = (time.perf_counter() - t0) * 1000.0
-        label = "ATTACK" if attack_conf >= self.threshold else "CLEAN"
-        return label, attack_conf
+        if attack_conf < self.threshold:
+            return "CLEAN", attack_conf
+
+        # Structured QR codes (badges/passes) excite the DCT channel but are
+        # legitimate: suppress only on the ATTACK path so clean ROIs pay no cost.
+        if self.qr_suppress and qr_code_present(roi_rgb):
+            logger.info(f"QR structured-code suppress: SDNL={attack_conf:.3f} -> CLEAN")
+            return "CLEAN", attack_conf
+        return "ATTACK", attack_conf
 
     def get_latency_ms(self) -> float:
         return self._latency_ms

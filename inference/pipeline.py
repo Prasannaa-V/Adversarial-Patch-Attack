@@ -70,6 +70,7 @@ class PipelineConfig:
     demo_attack_every: int = 0         # 0=disabled; N>0 forces conf=0.95 attack every Nth frame (demo)
     demo_confidence: float = 0.95
     alert_cooldown_s: float = 15.0     # min seconds between stored alerts (one patch = one incident)
+    qr_suppress: bool = True           # suppress decodable QR structured codes (badges/passes)
 
     @classmethod
     def from_yaml(cls, path: str) -> "PipelineConfig":
@@ -92,6 +93,7 @@ class PipelineConfig:
         cfg.frames_dir = st.get("frames_dir", cfg.frames_dir)
         cfg.heartbeat_interval_s = raw.get("esp32", {}).get("heartbeat_interval_s", 5)
         cfg.alert_cooldown_s = float(inf.get("alert_cooldown_s", cfg.alert_cooldown_s))
+        cfg.qr_suppress = bool(inf.get("qr_suppress", cfg.qr_suppress))
         return cfg
 
 
@@ -152,6 +154,7 @@ class DualModelPipeline:
         self._sdnl = SDNLClassifier(
             model_path=self.config.sdnl_model,
             threshold=self.config.sdnl_threshold,
+            qr_suppress=self.config.qr_suppress,
         )
 
         self._store = FrameStore(frames_dir=self.config.frames_dir)
@@ -449,6 +452,7 @@ def main():
     
     parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.70 from config)")
     parser.add_argument("--alert-cooldown", type=float, default=None, help="Min seconds between stored alerts (default 15 from config)")
+    parser.add_argument("--no-qr-suppress", action="store_true", help="Disable QR structured-code suppression")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")
     parser.add_argument("--dry-run", action="store_true", help="Disable MQTT broker and backend POST (dry-run mode)")
     parser.add_argument("--demo-attack-every", type=int, default=0, help="Demo mode: force conf=0.95 attack every Nth frame (e.g. 10)")
@@ -478,6 +482,8 @@ def main():
         config.sdnl_threshold = args.threshold
     if args.alert_cooldown is not None:
         config.alert_cooldown_s = args.alert_cooldown
+    if args.no_qr_suppress:
+        config.qr_suppress = False
     if args.max_frames is not None:
         config.max_frames = args.max_frames
     if args.dry_run:

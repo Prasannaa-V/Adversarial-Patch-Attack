@@ -43,4 +43,7 @@ SDNL < 500K params, ONNX CPU edge-ready (≤ 15 ms/ROI target). Curves: `experim
 Zero-Trust HMAC-SHA256 on all `smartgate/*` MQTT topics (canonical form shared by
 Python/JS/ESP32 firmware); HTTP event intake requires HMAC; gate override and alert
 ack require JWT operator auth. ESP32 boots LOCKED, 15 s heartbeat watchdog, 30 s
-auto-release. See `docs/session_starter.md`, `docs/progress.md`, `.env.example`.
+auto-release. Decodable QR structured codes (badges/passes) are suppressed on the
+ATTACK path (`qr_suppress`, `config.yaml`) since dense QR grids excite the DCT channel;
+barcodes/textured signage can still false-positive — the durable fix is QR/texture
+negatives in the clean set + retrain. See `docs/session_starter.md`, `docs/progress.md`, `.env.example`.
