@@ -35,3 +35,15 @@ threshold 0.30 (clean max 0.046 vs attack p5 0.699 on the test split).
 ## External probes
 - 300 unseen INRIA pedestrian photos: 1.33% FPR (worst: window-grid facade).
 - COCO clean: 0.50% FPR (dense foliage nearest the line at 0.577).
+
+## Ablation: RGB-only vs RGB+DCT (identical protocol, seed 42, `--retrain` clean run)
+| | 3ch RGB | 4ch RGB+DCT |
+|---|---|---|
+| Accuracy | 60.93% (predicts ALL attack) | 98.60% |
+| AUC-ROC | 0.46 (~random) | 0.997 |
+| FPR | 100% | 1.19% |
+`experiments/results/ablation_report.txt`. Fresh identical-protocol 3ch run
+collapses from epoch 1 (val acc frozen at prevalence, early-stopped) while 4ch
+learns — the DCT channel makes the problem learnable, not just more accurate.
+Caveat: shared hyperparameters were tuned for 4ch; single seed. v2 weights
+verified byte-identical to backup after the run (script only reads them).

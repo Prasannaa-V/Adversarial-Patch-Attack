@@ -1,0 +1,19 @@
+Ablation Study: Baseline 3-Channel (RGB) vs Proposed 4-Channel (RGB + 2D DCT)
+===========================================================================
+
+Test Set Size: 215 (Clean: 84 | Attack: 131)
+
+Metric                    | Baseline (3-Ch RGB)    | Proposed (4-Ch RGB+DCT)
+---------------------------------------------------------------------------
+Input Modality            | RGB (3 Channels)       | RGB + 2D DCT (4 Channels)
+Optimal Threshold         | 0.0100                 | 0.0397                
+Accuracy                  | 60.93                % | 98.60                %
+Precision                 | 60.93                % | 99.23                %
+Recall                    | 100.00               % | 98.47                %
+F1-Score                  | 0.7572                 | 0.9885                
+False Positive Rate       | 100.00               % | 1.19                 %
+AUC-ROC                   | 0.4607                 | 0.9973                
+AUC-PR                    | 0.5219                 | 0.9985                
+CPU Latency (Mean)        | 4.80                ms | 4.59                ms
+CPU Latency (P95)         | 6.38                ms | 6.53                ms
+Confusion Matrix          | TP=131 FP=84 FN=0 TN=0 | TP=129 FP=1 FN=2 TN=83
