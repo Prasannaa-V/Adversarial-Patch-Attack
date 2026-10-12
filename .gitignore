@@ -43,3 +43,5 @@ data/frames/
 *.log
 .DS_Store
 .env
+# ── APDE external eval download (8GB+, reproducible via hf download) ──
+data/apde_hf/
