@@ -7,6 +7,7 @@ inference:
   yolo_model: "yolov8n.pt" # Auto-downloaded by ultralytics on first run
   sdnl_model: "models/sdnl/sdnl_v1.onnx"   # Path to trained ONNX model (primary edge backend; see inference/sdnl.py)
   sdnl_threshold: 0.70     # Attack detection threshold (0.0 - 1.0)
+  alert_cooldown_s: 15.0   # Min seconds between stored alerts: one continuous patch presentation = one incident
   frame_width: 640
   frame_height: 640
   fps_target: 20

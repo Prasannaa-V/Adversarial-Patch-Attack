@@ -43,7 +43,8 @@
 
 /* ─── Reset ──────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body, #root { height: 100%; overflow: hidden; }
+html { scroll-behavior: smooth; }
+html, body, #root { min-height: 100%; }
 body {
   background: var(--bg-main);
   background-image:
@@ -52,8 +53,9 @@ body {
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
   -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
 }
-#root { display: flex; flex-direction: column; }
+#root { display: flex; flex-direction: column; min-height: 100vh; }
 
 /* ─── Scrollbars ─────────────────────────────────────── */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -100,7 +102,7 @@ body {
 }
 .logo-subtitle { font-size: 10px; color: var(--text-muted); letter-spacing: 0.6px; margin-top: 1px; }
 
-.header-right { display: flex; align-items: center; gap: 8px; }
+.header-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; row-gap: 6px; }
 .status-pill {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 500;
@@ -143,24 +145,25 @@ body {
   text-transform: uppercase; flex-shrink: 0;
 }
 
-/* ─── Root Layout: header + body (no scroll on body) ──── */
+/* ─── Root Layout: single page scroll, sticky sidebar ──── */
 .main-layout {
   flex: 1;
   display: grid;
-  /* left pane takes all space, sidebar fixed */
-  grid-template-columns: 1fr var(--sidebar-w);
-  min-height: 0;
-  overflow: hidden;
+  grid-template-columns: minmax(0, 1fr) var(--sidebar-w);
+  align-items: start;
+  gap: 0;
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
 }
 
-/* ─── Left Pane: flexible scrollable pane ──── */
+/* ─── Left Pane: natural vertical flow (page scrolls) ──── */
 .content-pane {
   display: flex;
   flex-direction: column;
   gap: var(--gap);
   padding: var(--gap);
-  overflow-y: auto;
-  min-height: 0;
+  min-width: 0;
 }
 
 /* ─── Stats Row ─────────────────────────────────────── */
@@ -214,10 +217,8 @@ body {
 /* ─── Middle Row: Video + Gate ────────────────────────── */
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 220px;
+  grid-template-columns: minmax(0, 1fr) 240px;
   gap: var(--gap);
-  min-height: 400px;
-  flex-shrink: 0;
 }
 
 /* ─── Glass Card ─────────────────────────────────────── */
@@ -252,8 +253,7 @@ body {
 
 /* ─── Video Feed ─────────────────────────────────────── */
 .video-container {
-  flex: 1;
-  min-height: 340px;
+  min-height: 320px;
   background: #000;
   border-radius: var(--radius-sm);
   overflow: hidden;
@@ -261,9 +261,10 @@ body {
   border: 1px solid var(--border);
 }
 .video-active-body {
-  position: relative; width: 100%; height: 100%;
+  position: relative; width: 100%; min-height: 300px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   background: radial-gradient(ellipse at center, #0d1225 0%, #03060f 100%);
+  padding: 24px 12px;
 }
 .video-pulse-ring {
   width: 64px; height: 64px; border-radius: 50%;
@@ -341,26 +342,22 @@ body {
 .btn-ghost:hover { background: rgba(255,255,255,0.07); }
 .confirm-row { display: flex; gap: 6px; width: 100%; }
 
-/* ─── Gallery Row ─────────────────────────────────────── */
+/* ─── Gallery Row (natural height, page scrolls) ─────── */
 .gallery-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 14px;
   display: flex; flex-direction: column;
-  min-height: 0;
 }
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-  gap: 8px;
-  overflow-y: auto;
-  flex: 1;
-  min-height: 0;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
   padding-right: 2px;
 }
 .gallery-item {
-  aspect-ratio: 1; border-radius: var(--radius-sm);
+  aspect-ratio: 4/3; border-radius: var(--radius-sm);
   overflow: hidden; border: 1px solid var(--border);
   position: relative; cursor: pointer; background: #000;
   transition: var(--transition);
@@ -391,13 +388,19 @@ body {
   text-align: center; color: var(--text-muted); font-size: 12px;
 }
 
-/* ─── Sidebar ─────────────────────────────────────────── */
+/* ─── Sidebar (sticky card, own scroll) ─────────────── */
 .sidebar-pane {
-  border-left: 1px solid var(--border);
-  background: rgba(5,8,18,0.5);
+  position: sticky;
+  top: calc(var(--header-h) + 12px);
+  max-height: calc(100vh - var(--header-h) - 24px);
+  margin: var(--gap) var(--gap) var(--gap) 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(5,8,18,0.6);
   backdrop-filter: blur(16px);
   display: flex; flex-direction: column;
-  overflow: hidden; min-height: 0;
+  overflow: hidden;
+  min-height: 0;
 }
 .sidebar-header {
   padding: 14px 16px;
@@ -565,4 +568,48 @@ body {
 
 .login-field {
   display: flex; flex-direction: column; gap: 6px;
+}
+
+/* ─── Sticky header ──────────────────────────────────── */
+.app-header {
+  position: sticky;
+  top: 0;
+}
+
+/* ─── Analytics bars ─────────────────────────────────── */
+.analytics-bars {
+  display: flex; align-items: flex-end; gap: 4px;
+  min-height: 84px; padding: 8px 2px 2px;
+}
+.analytics-bar-col {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; gap: 4px; min-width: 0;
+}
+.analytics-bar {
+  width: 100%; border-radius: 3px;
+  background: linear-gradient(180deg, #818cf8, #6366f1);
+  opacity: 0.9; min-height: 4px;
+}
+.analytics-bar-label { font-size: 8px; color: var(--text-muted); }
+
+/* ─── Responsive ─────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .main-layout { grid-template-columns: minmax(0, 1fr); }
+  .sidebar-pane {
+    position: static; max-height: none;
+    margin: 0 var(--gap) var(--gap);
+  }
+  .alert-feed-list { max-height: 340px; }
+}
+@media (max-width: 900px) {
+  .main-grid { grid-template-columns: minmax(0, 1fr); }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .gate-control-card { padding: 18px 14px; }
+}
+@media (max-width: 560px) {
+  .content-pane { padding: 10px; }
+  .app-header { padding: 0 12px; height: auto; min-height: var(--header-h); padding-top: 8px; padding-bottom: 8px; }
+  .logo-text { font-size: 15px; }
+  .status-pill { font-size: 10px; padding: 4px 9px; }
+  .modal-meta-grid { grid-template-columns: 1fr; }
 }

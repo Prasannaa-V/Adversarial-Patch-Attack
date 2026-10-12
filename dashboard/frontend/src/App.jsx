@@ -468,16 +468,14 @@ function App() {
               }
               const max = Math.max(...dist.map(d => d.count), 1);
               return (
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 64, padding: '6px 2px 2px' }}>
+                <div className="analytics-bars">
                   {dist.map(d => (
-                    <div key={d.hour} title={`${d.hour}:00 — ${d.count}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
-                      <div style={{
-                        width: '100%', borderRadius: 3,
-                        height: `${Math.max(4, Math.round((d.count / max) * 48))}px`,
-                        background: 'linear-gradient(180deg,#818cf8,#6366f1)',
-                        opacity: 0.9,
-                      }} />
-                      <span style={{ fontSize: 8, color: 'var(--text-muted)' }}>{String(d.hour).padStart(2, '0')}</span>
+                    <div key={d.hour} className="analytics-bar-col" title={`${d.hour}:00 — ${d.count} attack${d.count === 1 ? '' : 's'}`}>
+                      <div
+                        className="analytics-bar"
+                        style={{ height: `${Math.max(4, Math.round((d.count / max) * 56))}px` }}
+                      />
+                      <span className="analytics-bar-label">{String(d.hour).padStart(2, '0')}</span>
                     </div>
                   ))}
                 </div>

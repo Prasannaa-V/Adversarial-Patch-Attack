@@ -38,6 +38,7 @@ class TestSdnlPipeline(unittest.TestCase):
         self.assertEqual(cfg.demo_attack_every, 0)
         cfg.demo_attack_every = 10
         self.assertEqual(cfg.demo_confidence, 0.95)
+        self.assertEqual(cfg.alert_cooldown_s, 15.0)
 
 
 if __name__ == "__main__":

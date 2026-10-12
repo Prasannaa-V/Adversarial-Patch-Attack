@@ -69,6 +69,7 @@ class PipelineConfig:
     dry_run: bool = False              # skip MQTT + backend POST
     demo_attack_every: int = 0         # 0=disabled; N>0 forces conf=0.95 attack every Nth frame (demo)
     demo_confidence: float = 0.95
+    alert_cooldown_s: float = 15.0     # min seconds between stored alerts (one patch = one incident)
 
     @classmethod
     def from_yaml(cls, path: str) -> "PipelineConfig":
@@ -90,6 +91,7 @@ class PipelineConfig:
         cfg.backend_url = f"http://{be.get('host','localhost')}:{be.get('port',3000)}"
         cfg.frames_dir = st.get("frames_dir", cfg.frames_dir)
         cfg.heartbeat_interval_s = raw.get("esp32", {}).get("heartbeat_interval_s", 5)
+        cfg.alert_cooldown_s = float(inf.get("alert_cooldown_s", cfg.alert_cooldown_s))
         return cfg
 
 
@@ -122,8 +124,7 @@ class DualModelPipeline:
         self._frame_count = 0
         self._attack_count = 0
         self._demo_counter = 0
-        self._last_alert_time = 0.0
-        self.alert_cooldown_s = 4.0  # 4-second incident debouncing / cooldown
+        self._last_alert_ts = 0.0
         self._t_start = 0.0
         self._live_frame_path = os.path.join(config.frames_dir, "live_frame.jpg")
 
@@ -265,6 +266,18 @@ class DualModelPipeline:
                 except queue.Empty:
                     pass
 
+    def should_publish_attack(self, confidence: float, now: float) -> bool:
+        """One patch = one incident: publish only if over threshold AND
+        cooldown elapsed since the last published alert. Thread-safe."""
+        if confidence < self.config.sdnl_threshold:
+            return False
+        with self._metrics_lock:
+            if (now - self._last_alert_ts) < self.config.alert_cooldown_s:
+                return False
+            self._last_alert_ts = now
+            self._attack_count += 1
+        return True
+
     # ── Thread 2: SDNL Worker ────────────────────────────────────────────────
     def _sdnl_worker(self):
         while self._running:
@@ -293,17 +306,20 @@ class DualModelPipeline:
                 logger.info(f"[DEMO] Forced attack frame #{self._demo_counter} conf={max_confidence:.2f}")
 
             now = time.time()
-            if max_confidence >= self.config.sdnl_threshold:
-                # Debounce alerts with a cooldown so 1 continuous presentation = 1 clean incident
-                if (now - self._last_alert_time) >= self.alert_cooldown_s:
-                    self._last_alert_time = now
-                    with self._metrics_lock:
-                        self._attack_count += 1
-                    alert = AlertPayload(bundle=bundle, confidence=max_confidence)
-                    try:
-                        self._alert_queue.put_nowait(alert)
-                    except queue.Full:
-                        logger.warning("Alert queue full — dropping alert")
+            if demo_hit:
+                # Explicit demo intent bypasses cooldown so demos stay lively.
+                with self._metrics_lock:
+                    self._last_alert_ts = now
+                    self._attack_count += 1
+                publish = True
+            else:
+                publish = self.should_publish_attack(max_confidence, now)
+            if publish:
+                alert = AlertPayload(bundle=bundle, confidence=max_confidence)
+                try:
+                    self._alert_queue.put_nowait(alert)
+                except queue.Full:
+                    logger.warning("Alert queue full — dropping alert")
 
             # Write annotated live frame snapshot for smooth dashboard streaming
             self._save_live_frame(bundle, max_confidence)
@@ -432,6 +448,7 @@ def main():
     parser.add_argument("--dummy", action="store_true", help="Use synthetic simulation generator (default fallback)")
     
     parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.70 from config)")
+    parser.add_argument("--alert-cooldown", type=float, default=None, help="Min seconds between stored alerts (default 15 from config)")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")
     parser.add_argument("--dry-run", action="store_true", help="Disable MQTT broker and backend POST (dry-run mode)")
     parser.add_argument("--demo-attack-every", type=int, default=0, help="Demo mode: force conf=0.95 attack every Nth frame (e.g. 10)")
@@ -459,6 +476,8 @@ def main():
 
     if args.threshold is not None:
         config.sdnl_threshold = args.threshold
+    if args.alert_cooldown is not None:
+        config.alert_cooldown_s = args.alert_cooldown
     if args.max_frames is not None:
         config.max_frames = args.max_frames
     if args.dry_run:
