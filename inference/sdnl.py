@@ -78,8 +78,12 @@ def qr_code_present(roi_bgr: np.ndarray) -> bool:
             roi_bgr, (256, 256), interpolation=cv2.INTER_LINEAR)
         detector = cv2.QRCodeDetector()
         data, _, _ = detector.detectAndDecode(probe)
-        # Require valid decoded QR payload to prevent false suppression of textured adversarial patches
-        return bool(data and len(data.strip()) > 0)
+        if data:
+            return True
+        # Fallback: locatable-but-undecodable QR (glare/angle/partial, e.g. iPad
+        # screens) is still a structured code, not a patch.
+        ok, _ = detector.detect(probe)
+        return bool(ok)
     except Exception:
         return False
 
