@@ -28,7 +28,7 @@ def main():
     assert big_scenes or small_scenes, "no COCO scene bases found"
 
     crops_dir = os.path.join("data", "crops", "comp_attack")
-    prep_attack = os.path.join("data", "preprocessed", "attack")
+    prep_attack = os.path.join("data", "preprocessed", "stress_attack")
     os.makedirs(crops_dir, exist_ok=True)
     for f in glob.glob(os.path.join(prep_attack, "comp_*.npy")):
         os.remove(f)

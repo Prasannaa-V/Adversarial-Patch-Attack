@@ -30,7 +30,7 @@ class TestSplitTiles(unittest.TestCase):
 
 
 class TestCompositeSet(unittest.TestCase):
-    PREP_ATTACK = os.path.join(os.path.dirname(__file__), "..", "data", "preprocessed", "attack")
+    PREP_ATTACK = os.path.join(os.path.dirname(__file__), "..", "data", "preprocessed", "stress_attack")
 
     def test_expected_count(self):
         files = glob.glob(os.path.join(self.PREP_ATTACK, "comp_*.npy"))
