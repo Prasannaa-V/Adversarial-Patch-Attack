@@ -57,11 +57,27 @@ def main():
         if side < 12:
             continue
         pr = cv2.resize(patch, (side, side), interpolation=cv2.INTER_LINEAR)
+        # Small in-plane rotation like a handheld patch (±12°, reflect border
+        # so no artificial edge lines are introduced).
+        ang = float(rng.uniform(-12, 12))
+        if abs(ang) > 1.0:
+            pr = cv2.warpAffine(pr, cv2.getRotationMatrix2D((side / 2, side / 2), ang, 1.0),
+                                (side, side), flags=cv2.INTER_LINEAR,
+                                borderMode=cv2.BORDER_REFLECT_101)
         if rng.random() < 0.5:  # lighting jitter like a live frame
             pr = np.clip(pr.astype(np.float32) * rng.uniform(0.75, 1.1), 0, 255).astype(np.uint8)
         y0, x0 = int(rng.integers(0, h - side)), int(rng.integers(0, w - side))
-        comp = scene.copy()
-        comp[y0:y0 + side, x0:x0 + side] = pr
+        # Feathered alpha blend: a hard rectangle edge is a shortcut feature
+        # the model must NOT be allowed to learn.
+        r = max(3, side // 12)
+        alpha = np.zeros((side, side), np.float32)
+        alpha[r:-r, r:-r] = 1.0
+        alpha = cv2.GaussianBlur(alpha, (0, 0), r / 2.0)[..., None]
+        comp = scene.copy().astype(np.float32)
+        comp[y0:y0 + side, x0:x0 + side] = (
+            pr.astype(np.float32) * alpha
+            + comp[y0:y0 + side, x0:x0 + side] * (1.0 - alpha))
+        comp = np.clip(comp, 0, 255).astype(np.uint8)
         comp128 = cv2.resize(comp, (128, 128), interpolation=cv2.INTER_LINEAR)
         name = f"comp_{made:04d}"
         cv2.imwrite(os.path.join(crops_dir, name + ".jpg"), comp128)

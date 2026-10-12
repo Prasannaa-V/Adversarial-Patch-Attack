@@ -131,6 +131,10 @@ def train(args):
     # Gather dataset file paths
     clean_files = glob.glob(os.path.join(args.data_dir, "clean", "*.npy"))
     attack_files = glob.glob(os.path.join(args.data_dir, "attack", "*.npy"))
+    # Optional extra attack dirs (e.g. stress composites): train pool only,
+    # kept out of data_dir/attack/ so the official benchmark pool is stable.
+    for extra in (args.extra_attack or []):
+        attack_files += glob.glob(os.path.join(extra, "*.npy"))
     
     if not clean_files or not attack_files:
         print(f"[ERROR] No preprocessed files found in data_dir: {args.data_dir}")
@@ -164,19 +168,35 @@ def train(args):
     # Initialize model
     model = SDNLModel(num_classes=2, in_channels=args.in_channels).to(device)
     
+    # Class-weighted loss: attack-heavy pools otherwise bias the model toward ATTACK.
+    n_clean = int(np.sum(np.array(train_lbls) == 0))
+    n_attack = int(np.sum(np.array(train_lbls) == 1))
+    if args.no_class_weight or min(n_clean, n_attack) == 0:
+        class_w = None
+        print("Class weights: OFF")
+    else:
+        tot = n_clean + n_attack
+        class_w = torch.tensor([tot / (2 * n_clean), tot / (2 * n_attack)],
+                               dtype=torch.float32).to(device)
+        print(f"Class weights: clean={class_w[0]:.3f} attack={class_w[1]:.3f} "
+              f"(train {n_clean} clean / {n_attack} attack)")
+
     # Loss function selection
     if args.use_focal_loss:
         criterion = FocalLoss(alpha=0.25, gamma=2.0)
         print("Loss Function: FocalLoss (alpha=0.25, gamma=2.0)")
     else:
-        criterion = nn.CrossEntropyLoss()
-        print("Loss Function: CrossEntropyLoss")
+        criterion = nn.CrossEntropyLoss(weight=class_w)
+        print(f"Loss Function: CrossEntropyLoss{' (class-weighted)' if class_w is not None else ''}")
 
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
-    # Training
+    # Training (strict-> best checkpoint + patience early stopping: the old
+    # >= comparison kept overwriting ties and shipped the LAST epoch)
     best_val_f1 = 0.0
+    best_epoch = 0
+    patience = args.patience
     model_save_dir = "models/sdnl"
     os.makedirs(model_save_dir, exist_ok=True)
     pytorch_model_path = os.path.join(model_save_dir, "sdnl_v1.pt")
@@ -223,11 +243,16 @@ def train(args):
         print(f"Epoch {epoch:02d}/{args.epochs} | Train Loss: {train_loss:.4f} | "
               f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f} | Val F1: {val_f1:.4f}")
 
-        if val_f1 >= best_val_f1:
+        if val_f1 > best_val_f1:  # strict: ties keep the EARLIER (less overfit) epoch
             best_val_f1 = val_f1
+            best_epoch = epoch
             torch.save(model.state_dict(), best_chkpt_path)
             torch.save(model.state_dict(), pytorch_model_path)
             print(f"  --> Saved best model checkpoint to '{pytorch_model_path}' (Val F1: {val_f1:.4f})")
+        elif patience > 0 and (epoch - best_epoch) >= patience:
+            print(f"  !! Early stopping: no val-F1 improvement for {patience} epochs "
+                  f"(best {best_val_f1:.4f} @ epoch {best_epoch})")
+            break
 
     # Optimal Threshold Selection for FPR <= 5%
     optimal_thresh = tune_confidence_threshold(val_targets, val_probs, target_fpr=0.05)
@@ -291,6 +316,9 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--in-channels", type=int, default=4, help="Input channels (3 for RGB, 4 for RGB+DCT)")
     parser.add_argument("--use-focal-loss", action="store_true", help="Use Focal Loss instead of CrossEntropy")
+    parser.add_argument("--no-class-weight", action="store_true", help="Disable inverse-frequency class weights")
+    parser.add_argument("--extra-attack", action="append", default=[], help="Extra attack .npy dir for the TRAIN pool only (e.g. data/preprocessed/stress_attack)")
+    parser.add_argument("--patience", type=int, default=8, help="Early-stop after N epochs without val-F1 gain (0 = off)")
     args = parser.parse_args()
     
     train(args)
