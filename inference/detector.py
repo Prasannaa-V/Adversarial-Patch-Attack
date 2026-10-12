@@ -251,12 +251,17 @@ class YOLODetector:
                 detections.append(BBox(x1=x1, y1=y1, x2=x2, y2=y2,
                                        label=label, confidence=conf))
 
-        # If no YOLO bbox found (e.g. patch held close to lens covering frame), evaluate center ROI
+        # If no YOLO bbox found, evaluate candidate ROI
         if len(detections) == 0:
             h, w = frame.shape[:2]
-            detections.append(BBox(x1=int(w * 0.15), y1=int(h * 0.15),
-                                   x2=int(w * 0.85), y2=int(h * 0.85),
-                                   label="camera_field", confidence=0.85))
+            if self._mode in ["image", "folder"]:
+                # For standalone test image crops, evaluate the whole image
+                detections.append(BBox(x1=0, y1=0, x2=w, y2=h,
+                                       label="test_image", confidence=0.99))
+            else:
+                detections.append(BBox(x1=int(w * 0.15), y1=int(h * 0.15),
+                                       x2=int(w * 0.85), y2=int(h * 0.85),
+                                       label="camera_field", confidence=0.85))
 
         self._last_detections = detections
         return FrameBundle(rgb_frame=frame, detections=detections)
