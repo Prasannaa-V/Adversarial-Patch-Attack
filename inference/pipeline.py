@@ -71,6 +71,8 @@ class PipelineConfig:
     demo_confidence: float = 0.95
     alert_cooldown_s: float = 15.0     # min seconds between stored alerts (one patch = one incident)
     qr_suppress: bool = True           # suppress decodable QR structured codes (badges/passes)
+    roi_tiles: int = 1                 # EXPERIMENTAL: tiles×tiles grid max (measured: no gain + 70-110ms). 1 = whole ROI
+    score_log: Optional[str] = None    # CSV path for per-tile score calibration (None = disabled)
 
     @classmethod
     def from_yaml(cls, path: str) -> "PipelineConfig":
@@ -94,6 +96,7 @@ class PipelineConfig:
         cfg.heartbeat_interval_s = raw.get("esp32", {}).get("heartbeat_interval_s", 5)
         cfg.alert_cooldown_s = float(inf.get("alert_cooldown_s", cfg.alert_cooldown_s))
         cfg.qr_suppress = bool(inf.get("qr_suppress", cfg.qr_suppress))
+        cfg.roi_tiles = int(inf.get("roi_tiles", cfg.roi_tiles))
         return cfg
 
 
@@ -241,8 +244,11 @@ class DualModelPipeline:
                 time.sleep(0.05)
                 continue
 
-            # Pace image folder playback for presentation demos (1s per image)
-            if not self.config.use_webcam and isinstance(self.config.camera_source, str) and self.config.camera_source != "dummy":
+            # Pace image folder playback for presentation demos (1s per image).
+            # Live URL streams (http/rtsp) must NOT sleep — same as webcam.
+            src = self.config.camera_source
+            if (not self.config.use_webcam and isinstance(src, str) and src != "dummy"
+                    and "://" not in src):
                 time.sleep(1.0)
 
             with self._metrics_lock:
@@ -282,50 +288,88 @@ class DualModelPipeline:
         return True
 
     # ── Thread 2: SDNL Worker ────────────────────────────────────────────────
+    @staticmethod
+    def split_tiles(roi: np.ndarray, tiles: int):
+        """Split an ROI into a tiles×tiles grid (localized patch regions).
+
+        Training saw tight patch crops; live ROIs are whole person boxes where
+        a patch is diluted by background. Scoring tiles and taking the max
+        restores the train/infer distribution match. tiles=1 disables tiling.
+        """
+        if tiles <= 1:
+            return [roi]
+        h, w = roi.shape[:2]
+        out = []
+        for gy in range(tiles):
+            for gx in range(tiles):
+                y0, y1 = gy * h // tiles, (gy + 1) * h // tiles
+                x0, x1 = gx * w // tiles, (gx + 1) * w // tiles
+                if y1 > y0 and x1 > x0:
+                    out.append(roi[y0:y1, x0:x1])
+        return out or [roi]
+
     def _sdnl_worker(self):
-        while self._running:
-            try:
-                bundle: FrameBundle = self._roi_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
-
-            max_confidence = 0.0
-
-            for bbox in bundle.detections:
-                roi = bbox.to_roi(bundle.rgb_frame)
-                label, conf = self._sdnl.infer(roi)
-                with self._metrics_lock:
-                    self._sdnl_latency_ms = self._sdnl.get_latency_ms()
-
-                if label == "ATTACK" and conf > max_confidence:
-                    max_confidence = conf
-
-            with self._metrics_lock:
-                self._demo_counter += 1
-                demo_n = self.config.demo_attack_every
-                demo_hit = demo_n > 0 and (self._demo_counter % demo_n == 0)
-            if demo_hit:
-                max_confidence = max(max_confidence, self.config.demo_confidence)
-                logger.info(f"[DEMO] Forced attack frame #{self._demo_counter} conf={max_confidence:.2f}")
-
-            now = time.time()
-            if demo_hit:
-                # Explicit demo intent bypasses cooldown so demos stay lively.
-                with self._metrics_lock:
-                    self._last_alert_ts = now
-                    self._attack_count += 1
-                publish = True
-            else:
-                publish = self.should_publish_attack(max_confidence, now)
-            if publish:
-                alert = AlertPayload(bundle=bundle, confidence=max_confidence)
+        scorer = None
+        if self.config.score_log:
+            fresh = not os.path.exists(self.config.score_log) or os.path.getsize(self.config.score_log) == 0
+            scorer = open(self.config.score_log, "a", buffering=1)
+            if fresh:
+                scorer.write("timestamp,frame_id,bbox,tile,conf,published\n")
+        try:
+            while self._running:
                 try:
-                    self._alert_queue.put_nowait(alert)
-                except queue.Full:
-                    logger.warning("Alert queue full — dropping alert")
+                    bundle: FrameBundle = self._roi_queue.get(timeout=0.5)
+                except queue.Empty:
+                    continue
 
-            # Write annotated live frame snapshot for smooth dashboard streaming
-            self._save_live_frame(bundle, max_confidence)
+                max_confidence = 0.0
+                tile_rows = []  # (bbox_idx, tile_idx, conf) for optional score logging
+
+                for bi, bbox in enumerate(bundle.detections):
+                    roi = bbox.to_roi(bundle.rgb_frame)
+                    for ti, tile in enumerate(self.split_tiles(roi, self.config.roi_tiles)):
+                        label, conf = self._sdnl.infer(tile)
+                        with self._metrics_lock:
+                            self._sdnl_latency_ms = self._sdnl.get_latency_ms()
+
+                        if label == "ATTACK" and conf > max_confidence:
+                            max_confidence = conf
+                        tile_rows.append((bi, ti, conf))
+
+                with self._metrics_lock:
+                    self._demo_counter += 1
+                    demo_n = self.config.demo_attack_every
+                    demo_hit = demo_n > 0 and (self._demo_counter % demo_n == 0)
+                if demo_hit:
+                    max_confidence = max(max_confidence, self.config.demo_confidence)
+                    logger.info(f"[DEMO] Forced attack frame #{self._demo_counter} conf={max_confidence:.2f}")
+
+                now = time.time()
+                if demo_hit:
+                    # Explicit demo intent bypasses cooldown so demos stay lively.
+                    with self._metrics_lock:
+                        self._last_alert_ts = now
+                        self._attack_count += 1
+                    publish = True
+                else:
+                    publish = self.should_publish_attack(max_confidence, now)
+                if publish:
+                    alert = AlertPayload(bundle=bundle, confidence=max_confidence)
+                    try:
+                        self._alert_queue.put_nowait(alert)
+                    except queue.Full:
+                        logger.warning("Alert queue full — dropping alert")
+
+                if scorer is not None:
+                    flag = 1 if publish else 0
+                    for bi, ti, conf in tile_rows:
+                        scorer.write(f"{now:.3f},{bundle.frame_id},{bi},{ti},{conf:.4f},{flag}\n")
+
+                # Write annotated live frame snapshot for smooth dashboard streaming
+                self._save_live_frame(bundle, max_confidence)
+        finally:
+            if scorer is not None:
+                scorer.close()
 
     # ── Live frame writer ─────────────────────────────────────────────────────
     def _save_live_frame(self, bundle: FrameBundle, max_confidence: float):
@@ -445,6 +489,7 @@ def main():
     
     # Input source options (Bypass Camera)
     parser.add_argument("--use-webcam", action="store_true", help="Toggle live USB webcam feed (index 0)")
+    parser.add_argument("--camera-url", type=str, default=None, help="Phone/IP camera stream URL (e.g. http://192.168.1.5:8080/video)")
     parser.add_argument("--image", type=str, default=None, help="Path to single static image file")
     parser.add_argument("--image-dir", type=str, default=None, help="Path to folder of test images")
     parser.add_argument("--video", type=str, default=None, help="Path to sample video file")
@@ -452,6 +497,8 @@ def main():
     
     parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.30 from config)")
     parser.add_argument("--alert-cooldown", type=float, default=None, help="Min seconds between stored alerts (default 15 from config)")
+    parser.add_argument("--roi-tiles", type=int, default=None, help="EXPERIMENTAL: score ROI as N×N tile grid, take max (default 1 = whole ROI)")
+    parser.add_argument("--score-log", type=str, default=None, help="Append per-tile scores to CSV for threshold calibration")
     parser.add_argument("--no-qr-suppress", action="store_true", help="Disable QR structured-code suppression")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")
     parser.add_argument("--dry-run", action="store_true", help="Disable MQTT broker and backend POST (dry-run mode)")
@@ -465,8 +512,11 @@ def main():
         logger.warning(f"Config not found at '{args.config}', using defaults")
         config = PipelineConfig()
 
-    # Resolve input source hierarchy
-    if args.use_webcam:
+    # Resolve input source hierarchy (camera URL wins, like config.yaml)
+    if args.camera_url:
+        config.use_webcam = False
+        config.camera_source = args.camera_url
+    elif args.use_webcam:
         config.use_webcam = True
         config.camera_source = 0
     elif args.image:
@@ -482,6 +532,10 @@ def main():
         config.sdnl_threshold = args.threshold
     if args.alert_cooldown is not None:
         config.alert_cooldown_s = args.alert_cooldown
+    if args.roi_tiles is not None:
+        config.roi_tiles = args.roi_tiles
+    if args.score_log is not None:
+        config.score_log = args.score_log
     if args.no_qr_suppress:
         config.qr_suppress = False
     if args.max_frames is not None:
