@@ -60,6 +60,8 @@ class PipelineConfig:
     yolo_model: str = "yolov8n.pt"
     sdnl_model: str = "models/sdnl/sdnl_v1.onnx"
     sdnl_threshold: float = 0.30
+    yolo_imgsz: int = 416              # YOLO input resolution (320 = faster on weak CPUs)
+    detect_every: int = 1              # run YOLO every Nth frame, reuse boxes between (2 = ~2x FPS)
     broker_host: str = "localhost"
     broker_port: int = 1883
     backend_url: str = "http://localhost:3000"
@@ -87,6 +89,9 @@ class PipelineConfig:
         cam_url = inf.get("camera_url", "")
         cfg.camera_source = cam_url if cam_url else inf.get("camera_index", "dummy")
         cfg.yolo_model = inf.get("yolo_model", cfg.yolo_model)
+        cfg.yolo_imgsz = int(inf.get("yolo_imgsz", cfg.yolo_imgsz))
+        cfg.detect_every = int(inf.get("detect_every", 1)) if isinstance(inf.get("detect_every", 1), (int, float)) else 1
+        cfg.detect_every = max(1, cfg.detect_every)
         cfg.sdnl_model = inf.get("sdnl_model", cfg.sdnl_model)
         cfg.sdnl_threshold = inf.get("sdnl_threshold", cfg.sdnl_threshold)
         cfg.broker_host = mq.get("broker_host", cfg.broker_host)
@@ -151,6 +156,8 @@ class DualModelPipeline:
             camera_source=self.config.camera_source,
             use_webcam=self.config.use_webcam,
             conf_threshold=0.5,
+            imgsz=self.config.yolo_imgsz,
+            detect_every=self.config.detect_every,
         )
 
         logger.info("Loading SDNL classifier...")
@@ -496,6 +503,8 @@ def main():
     parser.add_argument("--dummy", action="store_true", help="Use synthetic simulation generator (default fallback)")
     
     parser.add_argument("--threshold", type=float, default=None, help="SDNL detection threshold (default 0.30 from config)")
+    parser.add_argument("--imgsz", type=int, default=None, help="YOLO input resolution, 320 for weak CPUs (default 416)")
+    parser.add_argument("--detect-every", type=int, default=None, help="Run YOLO every Nth frame, reuse boxes between (default 1)")
     parser.add_argument("--alert-cooldown", type=float, default=None, help="Min seconds between stored alerts (default 15 from config)")
     parser.add_argument("--roi-tiles", type=int, default=None, help="EXPERIMENTAL: score ROI as N×N tile grid, take max (default 1 = whole ROI)")
     parser.add_argument("--score-log", type=str, default=None, help="Append per-tile scores to CSV for threshold calibration")
@@ -530,6 +539,10 @@ def main():
 
     if args.threshold is not None:
         config.sdnl_threshold = args.threshold
+    if args.imgsz is not None:
+        config.yolo_imgsz = args.imgsz
+    if args.detect_every is not None:
+        config.detect_every = max(1, args.detect_every)
     if args.alert_cooldown is not None:
         config.alert_cooldown_s = args.alert_cooldown
     if args.roi_tiles is not None:

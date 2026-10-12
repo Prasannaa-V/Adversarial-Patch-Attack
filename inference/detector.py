@@ -84,6 +84,8 @@ class YOLODetector:
         use_webcam: bool = False,
         conf_threshold: float = 0.5,
         frame_size: tuple = (640, 640),
+        imgsz: int = 416,
+        detect_every: int = 1,
     ):
         from ultralytics import YOLO
 
@@ -91,6 +93,10 @@ class YOLODetector:
         self.model = YOLO(model_path)
         self.conf_threshold = conf_threshold
         self.frame_size = frame_size
+        self.imgsz = imgsz
+        self.detect_every = max(1, detect_every)
+        self._frame_idx = 0
+        self._last_detections: List[BBox] = []
         self._cap: Optional[cv2.VideoCapture] = None
         self.use_webcam = use_webcam
         
@@ -222,8 +228,15 @@ class YOLODetector:
         if frame.shape[:2] != (self.frame_size[1], self.frame_size[0]):
             frame = cv2.resize(frame, self.frame_size)
 
-        # Run YOLO detection with optimized 416px resolution on CPU
-        results = self.model(frame, imgsz=416, conf=self.conf_threshold, verbose=False)
+        # Frame skipping: reuse last boxes on skipped frames so the live view
+        # stays smooth while YOLO runs at 1/detect_every rate (default every frame).
+        self._frame_idx += 1
+        if (self.detect_every > 1 and (self._frame_idx - 1) % self.detect_every != 0
+                and self._last_detections):
+            return FrameBundle(rgb_frame=frame, detections=self._last_detections)
+
+        # Run YOLO detection with optimized resolution on CPU
+        results = self.model(frame, imgsz=self.imgsz, conf=self.conf_threshold, verbose=False)
         detections: List[BBox] = []
 
         for result in results:
@@ -245,6 +258,7 @@ class YOLODetector:
                                    x2=int(w * 0.85), y2=int(h * 0.85),
                                    label="camera_field", confidence=0.85))
 
+        self._last_detections = detections
         return FrameBundle(rgb_frame=frame, detections=detections)
 
     def release(self):
