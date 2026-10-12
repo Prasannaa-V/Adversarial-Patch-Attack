@@ -78,10 +78,8 @@ def qr_code_present(roi_bgr: np.ndarray) -> bool:
             roi_bgr, (256, 256), interpolation=cv2.INTER_LINEAR)
         detector = cv2.QRCodeDetector()
         data, _, _ = detector.detectAndDecode(probe)
-        if data:
-            return True
-        ok, _ = detector.detect(probe)
-        return bool(ok)
+        # Require valid decoded QR payload to prevent false suppression of textured adversarial patches
+        return bool(data and len(data.strip()) > 0)
     except Exception:
         return False
 
