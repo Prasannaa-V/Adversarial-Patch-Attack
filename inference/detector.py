@@ -259,11 +259,16 @@ class YOLODetector:
                 detections.append(BBox(x1=0, y1=0, x2=w, y2=h,
                                        label="test_image", confidence=0.99))
             else:
-                # Full photos / live frames: center fallback (a blinding patch
-                # usually sits centered; whole-frame scoring dilutes it away)
+                # Full photos / live frames: TWO center fallback boxes. A big
+                # patch blinds YOLO person detection, so the proposal must
+                # cover both the diffuse case (70%) and the concentrated case
+                # (40%): the worker scores every box and takes the max.
                 detections.append(BBox(x1=int(w * 0.15), y1=int(h * 0.15),
                                        x2=int(w * 0.85), y2=int(h * 0.85),
                                        label="camera_field", confidence=0.85))
+                detections.append(BBox(x1=int(w * 0.30), y1=int(h * 0.30),
+                                       x2=int(w * 0.70), y2=int(h * 0.70),
+                                       label="camera_field_tight", confidence=0.85))
 
         self._last_detections = detections
         return FrameBundle(rgb_frame=frame, detections=detections)
