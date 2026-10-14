@@ -259,17 +259,47 @@ class SDNLClassifier:
         return e / e.sum()
 
 
-def person_regions(roi_bgr: np.ndarray, label: str):
-    """Yield scored regions for one detection ROI.
+PROPOSAL_NAMES = [
+    "whole",
+    "top_half",
+    "bottom_half",
+] + [f"square_{i}" for i in range(16)]
 
-    Whole ROI always; plus top/bottom halves for person boxes. Worn/held
-    patches sit on the torso or lap while YOLO person boxes include headroom,
-    so a lap-level patch can be ~10% of the whole box yet ~80% of a half
-    (measured 0.006 full vs 0.897 bottom-half on the same ROI).
+
+def person_proposals(roi: np.ndarray, include_squares: bool = True):
+    """Generate hierarchical region proposals for a person ROI.
+
+    Yields whole ROI, top half, bottom half, and evenly spaced overlapping
+    squares for tall person boxes to recover localized patch resolution.
     """
-    yield roi_bgr
+    h, w = roi.shape[:2]
+    if h < 16 or w < 16:
+        return [roi]
+    regions = [roi, roi[: h // 2], roi[h // 2 :]]
+    side = min(w, h)
+    if include_squares and h > side and side > 0:
+        max_y = h - side
+        step = max(1, side // 3)
+        pos = list(range(0, max_y, step))
+        if not pos or pos[-1] != max_y:
+            pos.append(max_y)
+        if len(pos) > 8:
+            pos = [int(round(i * max_y / 7)) for i in range(8)]
+        seen = set()
+        unique = []
+        for y0 in pos:
+            if y0 not in seen:
+                seen.add(y0)
+                unique.append(y0)
+        for y0 in unique:
+            regions.append(roi[y0 : y0 + side])
+    return regions
+
+
+def person_regions(roi_bgr: np.ndarray, label: str, include_squares: bool = True):
+    """Yield scored regions for one detection ROI."""
     if label == "person":
-        h = roi_bgr.shape[0]
-        if h >= 16:
-            yield roi_bgr[:h // 2]
-            yield roi_bgr[h // 2:]
+        for r in person_proposals(roi_bgr, include_squares=include_squares):
+            yield r
+    else:
+        yield roi_bgr

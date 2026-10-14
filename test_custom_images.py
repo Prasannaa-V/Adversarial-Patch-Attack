@@ -19,7 +19,7 @@ import time
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(ROOT_DIR, "inference"))
 
-from sdnl import SDNLClassifier, person_regions
+from sdnl import SDNLClassifier, person_regions, person_proposals, PROPOSAL_NAMES
 from detector import YOLODetector  # exact pipeline proposal path (same boxes, same verdict)
 
 THRESHOLD = 0.30   # matches pipeline default
@@ -42,7 +42,10 @@ def main():
     print(f"[*] Loading YOLOv8n for ROI extraction (pipeline detector)...")
     use_yolo = True
     image_paths = []
-    for arg in sys.argv[1:]:
+    use_squares = "--no-person-squares" not in sys.argv
+    args_list = [a for a in sys.argv[1:] if a != "--no-person-squares"]
+
+    for arg in args_list:
         if os.path.isdir(arg):
             for ext in ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp"):
                 image_paths.extend(glob.glob(os.path.join(arg, ext)))
@@ -57,7 +60,7 @@ def main():
         print("[!] No valid image files found.")
         sys.exit(1)
 
-    print(f"\nEvaluating {len(image_paths)} image(s) [threshold={THRESHOLD:.0%}]:\n")
+    print(f"\nEvaluating {len(image_paths)} image(s) [threshold={THRESHOLD:.0%}, squares={'ON' if use_squares else 'OFF'}]:\n")
     header = f"{'Filename':<34} | {'YOLO Class':<17} | {'Result':<12} | {'SDNL Conf':>9} | {'Latency':>8}"
     print(header)
     print("-" * len(header))
@@ -75,7 +78,7 @@ def main():
 
         if use_yolo:
             # EXACT pipeline path: YOLODetector proposals (letterboxed) +
-            # whole/halves scoring via person_regions. Same boxes, same verdict.
+            # whole/halves/squares scoring via person_proposals. Same boxes, same verdict.
             from detector import YOLODetector
             det = YOLODetector(camera_source=p)
             bundle = det.get_frame()
@@ -84,14 +87,17 @@ def main():
             best_conf = 0.0
             best_label = "CLEAN"
             best_cls = ""
-            for r in bundle.detections:
+            for bi, r in enumerate(bundle.detections):
                 roi = r.to_roi(bundle.rgb_frame)
-                for region in person_regions(roi, r.label):
+                regions = (person_proposals(roi, include_squares=use_squares)
+                           if r.label == "person" else [roi])
+                for ti, region in enumerate(regions):
                     label, conf = sdnl.infer(region)
                     if conf > best_conf:
                         best_conf = conf
                         best_label = label
-                        best_cls = (f"{r.label}({r.confidence:.0%})"
+                        r_name = PROPOSAL_NAMES[ti] if ti < len(PROPOSAL_NAMES) else f"tile_{ti}"
+                        best_cls = (f"{r.label}:{r_name}"
                                     if not r.label.startswith("camera_") else "fallback")
         else:
             best_label, best_conf = sdnl.infer(img)

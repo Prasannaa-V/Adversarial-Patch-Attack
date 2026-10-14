@@ -2,7 +2,7 @@
 import os
 import sys
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 
@@ -54,6 +54,54 @@ class TestQrSuppress(unittest.TestCase):
         self.assertGreater(len(files), 10)
         for p in files:
             self.assertFalse(qr_code_present(cv2.imread(p)), msg=p)
+
+    def test_pipeline_qr_suppressed_does_not_raise_confidence_or_publish(self):
+        """A region scored as a decodable QR must not raise max_confidence above 0
+        and must not publish an alert."""
+        from detector import FrameBundle, BBox
+        from pipeline import DualModelPipeline, PipelineConfig
+
+        cfg = PipelineConfig(sdnl_threshold=0.30, qr_suppress=True, alert_cooldown_s=0.0)
+        pipeline = DualModelPipeline(cfg)
+
+        # Mock SDNL classifier returning CLEAN with high confidence (emulating QR suppression)
+        mock_sdnl = MagicMock()
+        mock_sdnl.infer.return_value = ("CLEAN", 0.85)
+        mock_sdnl.get_latency_ms.return_value = 1.0
+        pipeline._sdnl = mock_sdnl
+
+        frame = np.full((128, 128, 3), 200, dtype=np.uint8)
+        bundle = FrameBundle(
+            rgb_frame=frame,
+            detections=[BBox(x1=0, y1=0, x2=128, y2=128, label="person", confidence=0.95)]
+        )
+        pipeline._roi_queue.put(bundle)
+
+        recorded_max_conf = []
+
+        def intercept_save_live_frame(b, max_conf):
+            recorded_max_conf.append(max_conf)
+            pipeline._running = False
+
+        pipeline._save_live_frame = intercept_save_live_frame
+        pipeline._running = True
+        pipeline._sdnl_worker()
+
+        self.assertEqual(len(recorded_max_conf), 1)
+        self.assertEqual(recorded_max_conf[0], 0.0)
+        self.assertTrue(pipeline._alert_queue.empty())
+        self.assertEqual(pipeline._attack_count, 0)
+
+        # Contrast check: an unsuppressed ATTACK does raise max_confidence and publishes
+        mock_sdnl.infer.return_value = ("ATTACK", 0.85)
+        pipeline._roi_queue.put(bundle)
+        pipeline._running = True
+        pipeline._sdnl_worker()
+
+        self.assertEqual(len(recorded_max_conf), 2)
+        self.assertAlmostEqual(recorded_max_conf[1], 0.85, places=2)
+        self.assertFalse(pipeline._alert_queue.empty())
+        self.assertEqual(pipeline._attack_count, 1)
 
 
 if __name__ == "__main__":

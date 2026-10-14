@@ -41,9 +41,8 @@ class BBox:
         x2 = min(w, self.x2)
         y2 = min(h, self.y2)
         if x2 <= x1 or y2 <= y1:
-            return np.zeros((128, 128, 3), dtype=np.uint8)
-        roi = frame[y1:y2, x1:x2]
-        return cv2.resize(roi, (128, 128), interpolation=cv2.INTER_LINEAR)
+            return np.zeros((16, 16, 3), dtype=np.uint8)
+        return frame[y1:y2, x1:x2]
 
     def area(self) -> int:
         return (self.x2 - self.x1) * (self.y2 - self.y1)

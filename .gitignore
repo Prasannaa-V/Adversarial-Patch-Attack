@@ -38,6 +38,7 @@ data/frames/
 *.db
 *.sqlite
 *.sqlite3
+*.bak
 
 # ── Logs / OS / env ────────────────────────────────
 *.log

@@ -36,12 +36,12 @@ try:
     from detector import FrameBundle, YOLODetector
     from frame_store import FrameStore
     from mqtt_client import MQTTClient, generate_payload_signature
-    from sdnl import SDNLClassifier, person_regions
+    from sdnl import SDNLClassifier, person_regions, person_proposals, PROPOSAL_NAMES
 except ImportError:
     from inference.detector import FrameBundle, YOLODetector
     from inference.frame_store import FrameStore
     from inference.mqtt_client import MQTTClient, generate_payload_signature
-    from inference.sdnl import SDNLClassifier, person_regions
+    from inference.sdnl import SDNLClassifier, person_regions, person_proposals, PROPOSAL_NAMES
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -73,6 +73,7 @@ class PipelineConfig:
     demo_confidence: float = 0.95
     alert_cooldown_s: float = 15.0     # min seconds between stored alerts (one patch = one incident)
     qr_suppress: bool = True           # suppress decodable QR structured codes (badges/passes)
+    person_squares: bool = True        # enable sliding square proposals for tall person boxes
     roi_tiles: int = 1                 # EXPERIMENTAL: tiles×tiles grid max (measured: no gain + 70-110ms). 1 = whole ROI
     score_log: Optional[str] = None    # CSV path for per-tile score calibration (None = disabled)
 
@@ -101,6 +102,7 @@ class PipelineConfig:
         cfg.heartbeat_interval_s = raw.get("esp32", {}).get("heartbeat_interval_s", 5)
         cfg.alert_cooldown_s = float(inf.get("alert_cooldown_s", cfg.alert_cooldown_s))
         cfg.qr_suppress = bool(inf.get("qr_suppress", cfg.qr_suppress))
+        cfg.person_squares = bool(inf.get("person_squares", cfg.person_squares))
         cfg.roi_tiles = int(inf.get("roi_tiles", cfg.roi_tiles))
         return cfg
 
@@ -321,7 +323,7 @@ class DualModelPipeline:
             fresh = not os.path.exists(self.config.score_log) or os.path.getsize(self.config.score_log) == 0
             scorer = open(self.config.score_log, "a", buffering=1)
             if fresh:
-                scorer.write("timestamp,frame_id,bbox,tile,conf,published\n")
+                scorer.write("timestamp,frame_id,bbox,tile,region,conf,label,published,max_region\n")
         try:
             while self._running:
                 try:
@@ -330,18 +332,23 @@ class DualModelPipeline:
                     continue
 
                 max_confidence = 0.0
-                tile_rows = []  # (bbox_idx, tile_idx, conf) for optional score logging
+                max_region_desc = "none"
+                tile_rows = []  # (bbox_idx, tile_idx, conf, label, region_name) for score logging
 
                 for bi, bbox in enumerate(bundle.detections):
                     roi = bbox.to_roi(bundle.rgb_frame)
-                    for ti, region in enumerate(person_regions(roi, bbox.label)):
+                    regions = (person_proposals(roi, include_squares=self.config.person_squares)
+                               if bbox.label == "person" else [roi])
+                    for ti, region in enumerate(regions):
                         label, conf = self._sdnl.infer(region)
                         with self._metrics_lock:
                             self._sdnl_latency_ms = self._sdnl.get_latency_ms()
 
+                        r_name = PROPOSAL_NAMES[ti] if ti < len(PROPOSAL_NAMES) else f"tile_{ti}"
                         if label == "ATTACK" and conf > max_confidence:
                             max_confidence = conf
-                        tile_rows.append((bi, ti, conf))
+                            max_region_desc = f"bbox{bi}:{bbox.label}:{r_name}"
+                        tile_rows.append((bi, ti, conf, label, r_name))
 
                 with self._metrics_lock:
                     self._demo_counter += 1
@@ -365,12 +372,12 @@ class DualModelPipeline:
                     try:
                         self._alert_queue.put_nowait(alert)
                     except queue.Full:
-                        logger.warning("Alert queue full — dropping alert")
+                        logger.warning("Alert queue full - dropping alert")
 
                 if scorer is not None:
                     flag = 1 if publish else 0
-                    for bi, ti, conf in tile_rows:
-                        scorer.write(f"{now:.3f},{bundle.frame_id},{bi},{ti},{conf:.4f},{flag}\n")
+                    for bi, ti, conf, label, r_name in tile_rows:
+                        scorer.write(f"{now:.3f},{bundle.frame_id},{bi},{ti},{r_name},{conf:.4f},{label},{flag},{max_region_desc}\n")
 
                 # Write annotated live frame snapshot for smooth dashboard streaming
                 self._save_live_frame(bundle, max_confidence)
@@ -509,6 +516,8 @@ def main():
     parser.add_argument("--roi-tiles", type=int, default=None, help="EXPERIMENTAL: score ROI as N×N tile grid, take max (default 1 = whole ROI)")
     parser.add_argument("--score-log", type=str, default=None, help="Append per-tile scores to CSV for threshold calibration")
     parser.add_argument("--no-qr-suppress", action="store_true", help="Disable QR structured-code suppression")
+    parser.add_argument("--no-person-squares", action="store_true", help="Disable square sliding proposals for person boxes")
+    parser.add_argument("--person-squares", action="store_true", default=None, help="Enable square sliding proposals for person boxes (default: on)")
     parser.add_argument("--max-frames", type=int, default=None, help="Auto-stop pipeline after processing N frames")
     parser.add_argument("--dry-run", action="store_true", help="Disable MQTT broker and backend POST (dry-run mode)")
     parser.add_argument("--demo-attack-every", type=int, default=0, help="Demo mode: force conf=0.95 attack every Nth frame (e.g. 10)")
@@ -551,6 +560,10 @@ def main():
         config.score_log = args.score_log
     if args.no_qr_suppress:
         config.qr_suppress = False
+    if args.no_person_squares:
+        config.person_squares = False
+    elif args.person_squares:
+        config.person_squares = True
     if args.max_frames is not None:
         config.max_frames = args.max_frames
     if args.dry_run:

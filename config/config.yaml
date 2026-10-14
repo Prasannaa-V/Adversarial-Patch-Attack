@@ -11,6 +11,7 @@ inference:
   sdnl_threshold: 0.30     # Attack detection threshold: clean max 0.046 vs attack p5 0.699 → 0.30 gives 6x FP margin
   alert_cooldown_s: 15.0   # Min seconds between stored alerts: one continuous patch presentation = one incident
   qr_suppress: true        # Suppress decodable QR structured codes (badges/passes) on the ATTACK path
+  person_squares: true     # Add sliding square proposals for tall person boxes (improved patch recall)
   roi_tiles: 1             # EXPERIMENTAL tiling (measured: no gain over whole-ROI + 70-110ms cost). 1 = whole ROI.
   frame_width: 640
   frame_height: 640

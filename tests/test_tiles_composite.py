@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from inference.pipeline import DualModelPipeline
-from inference.sdnl import person_regions
+from inference.sdnl import person_regions, person_proposals
 
 
 class TestPersonRegions(unittest.TestCase):
@@ -28,6 +28,48 @@ class TestPersonRegions(unittest.TestCase):
     def test_tiny_roi_skips_halves(self):
         roi = np.zeros((8, 8, 3), dtype=np.uint8)
         self.assertEqual(len(list(person_regions(roi, "person"))), 1)
+
+
+class TestPersonProposals(unittest.TestCase):
+    def test_tall_box_yields_overlapping_squares(self):
+        roi = np.ones((200, 100, 3), dtype=np.uint8)
+        regions = person_proposals(roi, include_squares=True)
+        # 3 base regions (whole, top half, bottom half) + 5 overlapping squares
+        self.assertEqual(len(regions), 8)
+        for sq in regions[3:]:
+            self.assertEqual(sq.shape, (100, 100, 3))
+
+    def test_every_y_position_covered_by_at_least_one_square(self):
+        h, w = 483, 139
+        side = min(w, h)
+        max_y = h - side
+        roi = np.arange(h, dtype=np.int32)[:, None, None].repeat(w, axis=1).repeat(3, axis=2)
+        regions = person_proposals(roi, include_squares=True)
+        squares = regions[3:]
+        self.assertGreaterEqual(len(squares), 2)
+        covered_rows = set()
+        for sq in squares:
+            covered_rows.update(sq[:, 0, 0].tolist())
+        for y in range(max_y + 1):
+            self.assertIn(y, covered_rows)
+
+    def test_wide_box_no_squares_added(self):
+        roi = np.ones((100, 200, 3), dtype=np.uint8)
+        regions = person_proposals(roi, include_squares=True)
+        self.assertEqual(len(regions), 3)
+
+    def test_regions_all_non_empty(self):
+        roi = np.ones((250, 120, 3), dtype=np.uint8)
+        regions = person_proposals(roi, include_squares=True)
+        for r in regions:
+            self.assertGreater(r.size, 0)
+            self.assertGreater(r.shape[0], 0)
+            self.assertGreater(r.shape[1], 0)
+
+    def test_include_squares_false(self):
+        roi = np.ones((200, 100, 3), dtype=np.uint8)
+        regions = person_proposals(roi, include_squares=False)
+        self.assertEqual(len(regions), 3)
 
 
 class TestSplitTiles(unittest.TestCase):
